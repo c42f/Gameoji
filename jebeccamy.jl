@@ -5,9 +5,10 @@ module Jebeccamy
 using Logging
 
 using TerminalMenus
+using TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
 
-const right_cursors = (TerminalMenus.ARROW_UP, TerminalMenus.ARROW_DOWN,
-                          TerminalMenus.ARROW_LEFT, TerminalMenus.ARROW_RIGHT)
+CTRL_C = Char(3)
+const right_cursors = (ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT)
 
 const left_cursors = ('w', 's', 'a', 'd')
 
@@ -100,7 +101,6 @@ end
 
 function action!(girl::Girl, board, p0, inchar)
     if inchar == '1'
-        @info "Girl has items" girl.items
         x = pop!(girl.items, '💣')
         if !isnothing(x)
             board[p0...] = '⏰'
@@ -114,7 +114,7 @@ function transition!(girl::Girl, board, pos)
     c = board[pos...]
     if c == '🧁'
         board[pos...] = '🎈'
-    elseif c in ('💣',)
+    elseif c in ('💣',fruits...)
         push!(girl.items, c)
         board[pos...] = ' '
     elseif c == '🍕'
@@ -138,7 +138,7 @@ function transition!(boy::Boy, board, pos)
     c = board[pos...]
     if c == '🍕'
         board[pos...] = '🎈'
-    elseif c in ('💣',)
+    elseif c in ('💣',fruits...)
         push!(boy.items, c)
         board[pos...] = ' '
     end
@@ -184,6 +184,11 @@ const brick = '🧱'
 const cupcake = '🧁'
 const tree = '🌴'
 
+# join(Char.(Int('🕐') .+ (0:11)))
+clocks = collect("🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
+#fruits = collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")
+fruits = collect("🍍🍒")
+
 function printboard(io, cs)
     print(io, "\e[1;1H", "\e[J")
               #homepos   #clear
@@ -199,19 +204,25 @@ function printboard(io, cs)
     end
 end
 
-function draw(board, people)
+function draw(board, sprites)
     io = IOBuffer()
     # Compose screen & print it
     screen = fill(' ', size(board,1)+1, size(board,2))
     screen[1:end-1, :] = board
-    for person in people
-        screen[person.pos...] = person.icon
+    for obj in sprites
+        screen[obj.pos...] = obj.icon
     end
-    players = [p for p in people if p isa Player]
+    players = [p for p in sprites if p isa Player]
     for (i,person) in enumerate(players)
-        itemlist = vcat([fill(k,cnt) for (k,cnt) in person.items]...)
-        xstart = i*size(screen,2)÷length(players)
-        screen[end, xstart:xstart+length(itemlist)-1] = itemlist
+        j = 1 + (i-1)*size(screen,2)÷length(players)
+        screen[end, j] = person.icon
+        screen[end, j+1] = '|'
+        j += 2
+        for (item,cnt) in person.items
+            str = "$(item)×$(cnt) "
+            screen[end,j:j+length(str)-1] .= collect(str)
+            j += length(str)
+        end
     end
     print(sprint(printboard, screen))
 end
@@ -235,9 +246,12 @@ addrand!(board, '🍕', 0.05)
 addrand!(board, tree, 0.01)
 addrand!(board, '💧', 0.01)
 addrand!(board, '💣', 0.2)
+for f in fruits
+    addrand!(board, f, 0.005)
+end
 
 middle = (screen.height÷2, screen.width÷2)
-people = vcat(
+sprites = vcat(
     [Dog((rand(1:screen.height),rand(1:screen.width))) for i=1:10],
     # People drawn last
     Girl(middle),
@@ -258,6 +272,17 @@ function rawmode(f, term)
     end
 end
 
+function read_key()
+    k = TerminalMenus.readKey()
+    if k in Int.((ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT))
+        return TerminalMenus.Key(k)
+    elseif k == 3 #=^C=#
+        return CTRL_C
+    else
+        return Char(k)
+    end
+end
+
 term = TerminalMenus.terminal
 open("log.txt", "w") do io
     with_logger(ConsoleLogger(io)) do
@@ -266,25 +291,21 @@ open("log.txt", "w") do io
             try
                 while true
                     if bytesavailable(in_stream) == 0
-                        draw(board, people)
+                        draw(board, sprites)
                         sleep(0.1)
                     end
-                    inchar = TerminalMenus.readKey()
-                    if inchar == 3 #=^C=#
-                        break
-                    end
-                    inchar = Char(inchar)
-                    @info "Read char" inchar
+                    key = read_key()
+                    key != CTRL_C || break
                     flush(io) # Hack!
-                    for person in people
-                        p0 = person.pos
-                        p1 = action!(person, board, p0, inchar)
+                    for obj in sprites
+                        p0 = obj.pos
+                        p1 = action!(obj, board, p0, key)
                         p1 = clampmove(board, p1)
                         # You can climb onto the bricks from the tree
                         if board[p1...] == brick && !(board[p0...] in (tree,brick))
                             p1 = p0
                         end
-                        transition!(person, board, p1)
+                        transition!(obj, board, p1)
                     end
                 end
             catch exc
