@@ -1,6 +1,6 @@
-module Jebeccamy
+module Gameoji
 
-#using StaticArrays
+using StaticArrays
 #using Revise
 using Logging
 
@@ -8,9 +8,8 @@ using TerminalMenus
 using TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
 
 CTRL_C = Char(3)
-const right_cursors = (ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT)
 
-const left_cursors = ('w', 's', 'a', 'd')
+const Vec = SVector{2,Int}
 
 function clampmove(board, p)
     (clamp(p[1], 1, size(board,1)),
@@ -54,12 +53,26 @@ Base.eltype(i::Items) = Pair{Char,Int}
 
 #-------------------------------------------------------------------------------
 # Sprites
-abstract type Player end
+abstract type Sprite end
+abstract type Player <: Sprite end
+
+"""
+    Propose an action for the sprite.
+
+Return the proposed next position for the sprite (game rules will be applied
+to this position).
+"""
+propose_action!(::Sprite, board, sprites, p0, inchar) = p0
+
+"""
+Get current picture for a sprite
+"""
+icon(sprite::Sprite) = sprite.icon
 
 mutable struct Girl <: Player
     base_icon::Char
     icon::Char
-    pos::Tuple{Int,Int}
+    pos::Vec
     items::Items
 end
 
@@ -71,7 +84,7 @@ end
 mutable struct Boy <: Player
     base_icon::Char
     icon::Char
-    pos::Tuple{Int,Int}
+    pos::Vec
     items::Items
 end
 
@@ -80,10 +93,10 @@ function Boy(pos)
     Boy(icon, icon, pos, Items())
 end
 
-mutable struct Dog
+mutable struct Dog <: Sprite
     base_icon::Char
     icon::Char
-    pos::Tuple{Int,Int}
+    pos::Vec
 end
 
 function Dog(pos)
@@ -91,23 +104,54 @@ function Dog(pos)
     Dog(icon, icon, pos)
 end
 
-function cursormove(up, down, left, right, inchar)
-    inchar == up    ? (-1, 0) :
-    inchar == down  ? ( 1, 0) :
-    inchar == left  ? ( 0,-1) :
-    inchar == right ? ( 0, 1) :
-                      ( 0, 0)
+mutable struct Clock <: Sprite
+    pos::Vec
+    time::Int
 end
 
-function action!(girl::Girl, board, p0, inchar)
-    if inchar == '1'
-        x = pop!(girl.items, '💣')
+Clock(pos) = Clock(pos, 0)
+
+icon(c::Clock) = clocks[mod1(c.time, length(clocks))]
+
+function keymap(::Girl, inchar)
+    keys = Dict('w' => :up,
+                's' => :down,
+                'a' => :left,
+                'd' => :right,
+                '1' => :use_bomb,
+               )
+    get(keys, inchar, :none)
+end
+
+function keymap(::Boy, inchar)
+    keys = Dict(ARROW_UP    => :up,
+                ARROW_DOWN  => :down,
+                ARROW_LEFT  => :left,
+                ARROW_RIGHT => :right,
+                '0'         => :use_bomb,
+               )
+    get(keys, inchar, :none)
+end
+
+function propose_action!(player::Player, board, sprites, p0, inchar)
+    action = keymap(player, inchar)
+    p = p0
+    if action == :use_bomb
+        x = pop!(player.items, '💣')
         if !isnothing(x)
-            board[p0...] = '⏰'
+            push!(sprites, Clock(player.pos))
+            #board[p0...] = '⏰'
         end
+    elseif action == :up
+        p += Vec(-1, 0)
+    elseif action == :down
+        p += Vec(1, 0)
+    elseif action == :left
+        p += Vec(0, -1)
+    elseif action == :right
+        p += Vec(0, 1)
     end
-    d = cursormove(left_cursors..., inchar)
-    return p0 .+ d
+    return p
 end
 
 function transition!(girl::Girl, board, pos)
@@ -127,11 +171,6 @@ function transition!(girl::Girl, board, pos)
         girl.icon = girl.base_icon
     end
     girl.pos = pos
-end
-
-function action!(boy::Boy, board, p0, inchar)
-    d = cursormove(right_cursors..., inchar)
-    return p0 .+ d
 end
 
 function transition!(boy::Boy, board, pos)
@@ -159,12 +198,15 @@ function transition!(dog::Dog, board, pos)
     dog.pos = pos
 end
 
-function action!(dog::Dog, board, p0, inchar)
+function propose_action!(dog::Dog, board, sprites, p0, inchar)
     # Random step move
-    d = rand([(1,0), (-1,0), (0,1), (0,-1)])
+    d = rand(Vec[(1,0), (-1,0), (0,1), (0,-1)])
     return p0 .+ d
 end
 
+function transition!(clock::Clock, board, pos)
+    clock.time += 1
+end
 
 #-------------------------------------------------------------------------------
 
@@ -210,12 +252,14 @@ function draw(board, sprites)
     screen = fill(' ', size(board,1)+1, size(board,2))
     screen[1:end-1, :] = board
     for obj in sprites
-        screen[obj.pos...] = obj.icon
+        screen[obj.pos...] = icon(obj)
     end
-    players = [p for p in sprites if p isa Player]
-    for (i,person) in enumerate(players)
-        j = 1 + (i-1)*size(screen,2)÷length(players)
-        screen[end, j] = person.icon
+    n_players = sum(p->p isa Player, sprites)
+    for (i,person) in enumerate(s for s in sprites if s isa Player)
+        # Players on top of objects
+        screen[person.pos...] = icon(person)
+        j = 1 + (i-1)*size(screen,2) ÷ n_players
+        screen[end, j] = icon(person)
         screen[end, j+1] = '|'
         j += 2
         for (item,cnt) in person.items
@@ -245,9 +289,9 @@ addrand!(board, cupcake, 0.02)
 addrand!(board, '🍕', 0.05)
 addrand!(board, tree, 0.01)
 addrand!(board, '💧', 0.01)
-addrand!(board, '💣', 0.2)
+addrand!(board, '💣', 0.03)
 for f in fruits
-    addrand!(board, f, 0.005)
+    addrand!(board, f, 0.05)
 end
 
 middle = (screen.height÷2, screen.width÷2)
@@ -299,7 +343,7 @@ open("log.txt", "w") do io
                     flush(io) # Hack!
                     for obj in sprites
                         p0 = obj.pos
-                        p1 = action!(obj, board, p0, key)
+                        p1 = propose_action!(obj, board, sprites, p0, key)
                         p1 = clampmove(board, p1)
                         # You can climb onto the bricks from the tree
                         if board[p1...] == brick && !(board[p0...] in (tree,brick))
