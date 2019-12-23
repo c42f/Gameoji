@@ -113,6 +113,15 @@ Clock(pos) = Clock(pos, 0)
 
 icon(c::Clock) = clocks[mod1(c.time, length(clocks))]
 
+mutable struct Boom <: Sprite
+    pos::Vec
+    time::Int
+end
+
+Boom(pos) = Boom(pos, 1)
+
+icon(c::Boom) = '💥'
+
 function keymap(::Girl, inchar)
     keys = Dict('w' => :up,
                 's' => :down,
@@ -166,22 +175,32 @@ function transition!(girl::Girl, board, pos)
     elseif c == '💩'
         board[pos...] = ' '
         girl.icon = '🤮'
+    elseif c == '💥'
+        # Fixme... why doesn't skull & crossbones or coffin work?
+        board[pos...] = '💀'
+        return nothing
     end
     if girl.icon == '🤮' && c == '💧'
         girl.icon = girl.base_icon
     end
     girl.pos = pos
+    return girl
 end
 
 function transition!(boy::Boy, board, pos)
     c = board[pos...]
+    @info "Boy @ " c
     if c == '🍕'
         board[pos...] = '🎈'
     elseif c in ('💣',fruits...)
         push!(boy.items, c)
         board[pos...] = ' '
+    elseif c == '💥'
+        board[pos...] = '💀'
+        return nothing
     end
     boy.pos = pos
+    return boy
 end
 
 function transition!(dog::Dog, board, pos)
@@ -196,6 +215,7 @@ function transition!(dog::Dog, board, pos)
         board[pos...] = '💩'
     end
     dog.pos = pos
+    return dog
 end
 
 function propose_action!(dog::Dog, board, sprites, p0, inchar)
@@ -204,22 +224,27 @@ function propose_action!(dog::Dog, board, sprites, p0, inchar)
     return p0 .+ d
 end
 
+function transition!(b::Boom, board, pos)
+    if b.time == 1
+        board[b.pos...] = '💥'
+    end
+    b.time += 1
+    if b.time == 3
+        board[b.pos...] = ' '
+        return nothing
+    end
+    return b
+end
+
 function transition!(clock::Clock, board, pos)
     clock.time += 1
+    if clock.time == 12
+        return [Boom(pos .+ (i,j)) for i = -1:1, j=-1:1]
+    end
+    return clock
 end
 
 #-------------------------------------------------------------------------------
-
-mutable struct Screen
-    io::IO
-    height::Int
-    width::Int
-end
-
-function Screen(io::IO)
-    dsize = displaysize(io)
-    Screen(io, dsize[1]-1, dsize[2]÷2)
-end
 
 # Some emoji chars for which textwidth is incorrect (??)
 const brick = '🧱'
@@ -227,7 +252,7 @@ const cupcake = '🧁'
 const tree = '🌴'
 
 # join(Char.(Int('🕐') .+ (0:11)))
-clocks = collect("🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
+clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
 #fruits = collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")
 fruits = collect("🍍🍒")
 
@@ -264,7 +289,9 @@ function draw(board, sprites)
         j += 2
         for (item,cnt) in person.items
             str = "$(item)×$(cnt) "
-            screen[end,j:j+length(str)-1] .= collect(str)
+            # FIXME: Proper drawing of state which doesn't crash...
+            jend = clamp(j+length(str)-1, 1, size(screen,2))
+            screen[end,j:jend] .= collect(str)[1:jend-j+1]
             j += length(str)
         end
     end
@@ -279,28 +306,6 @@ function addrand!(cs, c, prob::Real)
         end
     end
 end
-
-screen = Screen(stdout)
-
-board = fill(' ', screen.height, screen.width)
-#addrand!(board, '💩', 100)
-addrand!(board, brick, 0.4)
-addrand!(board, cupcake, 0.02)
-addrand!(board, '🍕', 0.05)
-addrand!(board, tree, 0.01)
-addrand!(board, '💧', 0.01)
-addrand!(board, '💣', 0.03)
-for f in fruits
-    addrand!(board, f, 0.05)
-end
-
-middle = (screen.height÷2, screen.width÷2)
-sprites = vcat(
-    [Dog((rand(1:screen.height),rand(1:screen.width))) for i=1:10],
-    # People drawn last
-    Girl(middle),
-    Boy(middle),
-)
 
 function rawmode(f, term)
     raw_mode_enabled = TerminalMenus.enableRawMode(term)
@@ -327,38 +332,77 @@ function read_key()
     end
 end
 
-term = TerminalMenus.terminal
-open("log.txt", "w") do io
-    with_logger(ConsoleLogger(io)) do
-        rawmode(term) do
-            in_stream = term.in_stream
-            try
-                while true
-                    if bytesavailable(in_stream) == 0
-                        draw(board, sprites)
-                        sleep(0.1)
-                    end
-                    key = read_key()
-                    key != CTRL_C || break
-                    flush(io) # Hack!
-                    for obj in sprites
-                        p0 = obj.pos
-                        p1 = propose_action!(obj, board, sprites, p0, key)
-                        p1 = clampmove(board, p1)
-                        # You can climb onto the bricks from the tree
-                        if board[p1...] == brick && !(board[p0...] in (tree,brick))
-                            p1 = p0
+function main_loop!(board, sprites)
+    term = TerminalMenus.terminal
+    open("log.txt", "w") do io
+        with_logger(ConsoleLogger(io)) do
+            rawmode(term) do
+                in_stream = term.in_stream
+                try
+                    while true
+                        if bytesavailable(in_stream) == 0
+                            draw(board, sprites)
+                            sleep(0.1)
                         end
-                        transition!(obj, board, p1)
+                        key = read_key()
+                        key != CTRL_C || break
+                        flush(io) # Hack!
+                        sprites_new = []
+                        for obj in sprites
+                            p0 = obj.pos
+                            p1 = propose_action!(obj, board, sprites, p0, key)
+                            p1 = clampmove(board, p1)
+                            # You can climb onto the bricks from the tree
+                            if board[p1...] == brick && !(board[p0...] in (tree,brick))
+                                p1 = p0
+                            end
+                            obj = transition!(obj, board, p1)
+                            if obj isa Sprite
+                                push!(sprites_new, obj)
+                            elseif obj isa AbstractArray
+                                append!(sprites_new, obj)
+                            end
+                        end
+                        sprites = filter(sprites_new) do s
+                            p = s.pos
+                            1 <= p[1] <= size(board,1) && 1 <= p[2] <= size(board,2)
+                        end
                     end
+                catch exc
+                    exc isa InterruptException || rethrow()
+                    nothing
+                finally
                 end
-            catch exc
-                exc isa InterruptException || rethrow()
-                nothing
-            finally
             end
         end
     end
 end
 
+sheight,swidth = displaysize(stdout)
+height = sheight - 1
+width = swidth ÷ 2
+
+board = fill(' ', height, width)
+#addrand!(board, '💩', 100)
+addrand!(board, brick, 0.7)
+addrand!(board, cupcake, 0.02)
+addrand!(board, '🍕', 0.05)
+addrand!(board, tree, 0.01)
+addrand!(board, '💧', 0.01)
+addrand!(board, '💣', 0.3)
+for f in fruits
+    addrand!(board, f, 0.05)
 end
+
+middle = (height÷2, width÷2)
+sprites = vcat(
+    [Dog((rand(1:height),rand(1:width))) for i=1:10],
+    # People drawn last
+    Girl(middle),
+    Boy(middle),
+)
+
+main_loop!(board, sprites)
+
+end
+
