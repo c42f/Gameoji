@@ -65,9 +65,15 @@ to this position).
 propose_action!(::Sprite, board, sprites, p0, inchar) = p0
 
 """
-Get current picture for a sprite
+    Move sprite to `pos`
+"""
+transition!(sprite::Sprite, board, pos) = sprite
+
+"""
+    Get current picture for a sprite
 """
 icon(sprite::Sprite) = sprite.icon
+
 
 mutable struct Girl <: Player
     base_icon::Char
@@ -75,11 +81,11 @@ mutable struct Girl <: Player
     pos::Vec
     items::Items
 end
-
 function Girl(pos)
     icon = '👧'
     Girl(icon, icon, pos, Items())
 end
+
 
 mutable struct Boy <: Player
     base_icon::Char
@@ -87,40 +93,54 @@ mutable struct Boy <: Player
     pos::Vec
     items::Items
 end
-
 function Boy(pos)
     icon = '👦'
     Boy(icon, icon, pos, Items())
 end
+
 
 mutable struct Dog <: Sprite
     base_icon::Char
     icon::Char
     pos::Vec
 end
-
 function Dog(pos)
     icon = '🐕'
     Dog(icon, icon, pos)
 end
 
+
 mutable struct Clock <: Sprite
     pos::Vec
     time::Int
 end
-
 Clock(pos) = Clock(pos, 0)
-
 icon(c::Clock) = clocks[mod1(c.time, length(clocks))]
+
 
 mutable struct Boom <: Sprite
     pos::Vec
     time::Int
 end
-
 Boom(pos) = Boom(pos, 1)
+icon(::Boom) = '💥'
 
-icon(c::Boom) = '💥'
+
+mutable struct Balloon <: Sprite
+    pos::Vec
+end
+icon(::Balloon) = '🎈'
+
+
+struct Grave <: Sprite
+    pos::Vec
+end
+# Fixme... why doesn't skull & crossbones or coffin work?
+icon(::Grave) = '💀'
+
+
+#-------------------------------------------------------------------------------
+# Sprite behaviour
 
 function keymap(::Girl, inchar)
     keys = Dict('w' => :up,
@@ -176,9 +196,7 @@ function transition!(girl::Girl, board, pos)
         board[pos...] = ' '
         girl.icon = '🤮'
     elseif c == '💥'
-        # Fixme... why doesn't skull & crossbones or coffin work?
-        board[pos...] = '💀'
-        return nothing
+        return Grave(pos)
     end
     if girl.icon == '🤮' && c == '💧'
         girl.icon = girl.base_icon
@@ -188,18 +206,17 @@ function transition!(girl::Girl, board, pos)
 end
 
 function transition!(boy::Boy, board, pos)
+    boy.pos = pos
     c = board[pos...]
-    @info "Boy @ " c
     if c == '🍕'
-        board[pos...] = '🎈'
+        board[pos...] = ' '
+        return [boy, Balloon(pos)]
     elseif c in ('💣',fruits...)
         push!(boy.items, c)
         board[pos...] = ' '
     elseif c == '💥'
-        board[pos...] = '💀'
-        return nothing
+        return Grave(pos)
     end
-    boy.pos = pos
     return boy
 end
 
@@ -242,6 +259,20 @@ function transition!(clock::Clock, board, pos)
         return [Boom(pos .+ (i,j)) for i = -1:1, j=-1:1]
     end
     return clock
+end
+
+
+function propose_action!(balloon::Balloon, board, sprites, p0, inchar)
+    # Balloons float to top
+    p0 .+ Vec(-1,0)
+end
+
+function transition!(balloon::Balloon, board, pos)
+    if pos[1] == 1
+        return Boom(pos)
+    end
+    balloon.pos = pos
+    return balloon
 end
 
 #-------------------------------------------------------------------------------
@@ -353,14 +384,18 @@ function main_loop!(board, sprites)
                             p1 = propose_action!(obj, board, sprites, p0, key)
                             p1 = clampmove(board, p1)
                             # You can climb onto the bricks from the tree
-                            if board[p1...] == brick && !(board[p0...] in (tree,brick))
+                            # HACK
+                            if !(obj isa Balloon) && board[p1...] == brick && !(board[p0...] in (tree,brick))
                                 p1 = p0
                             end
                             obj = transition!(obj, board, p1)
-                            if obj isa Sprite
-                                push!(sprites_new, obj)
-                            elseif obj isa AbstractArray
-                                append!(sprites_new, obj)
+                            if !isnothing(obj)
+                                if obj isa AbstractArray
+                                    append!(sprites_new, obj)
+                                else
+                                    obj::Sprite
+                                    push!(sprites_new, obj)
+                                end
                             end
                         end
                         sprites = filter(sprites_new) do s
@@ -384,19 +419,19 @@ width = swidth ÷ 2
 
 board = fill(' ', height, width)
 #addrand!(board, '💩', 100)
-addrand!(board, brick, 0.7)
+addrand!(board, brick, 0.6)
 addrand!(board, cupcake, 0.02)
 addrand!(board, '🍕', 0.05)
 addrand!(board, tree, 0.01)
 addrand!(board, '💧', 0.01)
-addrand!(board, '💣', 0.3)
+addrand!(board, '💣', 0.03)
 for f in fruits
-    addrand!(board, f, 0.05)
+    addrand!(board, f, 0.01)
 end
 
 middle = (height÷2, width÷2)
 sprites = vcat(
-    [Dog((rand(1:height),rand(1:width))) for i=1:10],
+    [Dog((rand(1:height),rand(1:width))) for i=1:4],
     # People drawn last
     Girl(middle),
     Boy(middle),
