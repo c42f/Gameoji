@@ -139,6 +139,12 @@ end
 icon(::Grave) = '💀'
 
 
+struct ExplodingPineapple <: Sprite
+    pos::Vec
+end
+# Fixme... why doesn't skull & crossbones or coffin work?
+icon(::ExplodingPineapple) = '🍍'
+
 #-------------------------------------------------------------------------------
 # Sprite behaviour
 
@@ -166,10 +172,13 @@ function propose_action!(player::Player, board, sprites, p0, inchar)
     action = keymap(player, inchar)
     p = p0
     if action == :use_bomb
-        x = pop!(player.items, '💣')
-        if !isnothing(x)
-            push!(sprites, Clock(player.pos))
-            #board[p0...] = '⏰'
+        if icon(player) != '🤮'
+            # FIXME it's weird to push clocks onto the sprites list here
+            x = pop!(player.items, '💣')
+            if !isnothing(x)
+                push!(sprites, Clock(player.pos))
+                #board[p0...] = '⏰'
+            end
         end
     elseif action == :up
         p += Vec(-1, 0)
@@ -184,9 +193,11 @@ function propose_action!(player::Player, board, sprites, p0, inchar)
 end
 
 function transition!(girl::Girl, board, pos)
+    girl.pos = pos
     c = board[pos...]
     if c == '🧁'
-        board[pos...] = '🎈'
+        board[pos...] = ' '
+        return [girl, Balloon(pos)]
     elseif c in ('💣',fruits...)
         push!(girl.items, c)
         board[pos...] = ' '
@@ -201,7 +212,6 @@ function transition!(girl::Girl, board, pos)
     if girl.icon == '🤮' && c == '💧'
         girl.icon = girl.base_icon
     end
-    girl.pos = pos
     return girl
 end
 
@@ -275,6 +285,15 @@ function transition!(balloon::Balloon, board, pos)
     return balloon
 end
 
+
+function transition!(ep::ExplodingPineapple, board, pos)
+    if rand() < 0.01
+        return [Boom(pos .+ Vec(i,j)) for i = -1:1, j=-1:1]
+    end
+    return ep
+end
+
+
 #-------------------------------------------------------------------------------
 
 # Some emoji chars for which textwidth is incorrect (??)
@@ -285,7 +304,7 @@ const tree = '🌴'
 # join(Char.(Int('🕐') .+ (0:11)))
 clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
 #fruits = collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")
-fruits = collect("🍍🍒")
+fruits = collect("🍌🍒")
 
 function printboard(io, cs)
     print(io, "\e[1;1H", "\e[J")
@@ -310,8 +329,9 @@ function draw(board, sprites)
     for obj in sprites
         screen[obj.pos...] = icon(obj)
     end
-    n_players = sum(p->p isa Player, sprites)
-    for (i,person) in enumerate(s for s in sprites if s isa Player)
+    players = [s for s in sprites if s isa Player]
+    n_players = length(players)
+    for (i,person) in enumerate(players)
         # Players on top of objects
         screen[person.pos...] = icon(person)
         j = 1 + (i-1)*size(screen,2) ÷ n_players
@@ -376,7 +396,10 @@ function main_loop!(board, sprites)
                             sleep(0.1)
                         end
                         key = read_key()
-                        key != CTRL_C || break
+                        if key == CTRL_C
+                            draw(fill(' ', size(board)), [])
+                            return
+                        end
                         flush(io) # Hack!
                         sprites_new = []
                         for obj in sprites
@@ -430,11 +453,16 @@ for f in fruits
 end
 
 middle = (height÷2, width÷2)
+girl = Girl(middle)
+boy = Boy(middle)
+push!(girl.items, '💣')
+push!(boy.items, '💣')
+
 sprites = vcat(
     [Dog((rand(1:height),rand(1:width))) for i=1:4],
-    # People drawn last
-    Girl(middle),
-    Boy(middle),
+    [ExplodingPineapple((rand(1:height),rand(1:width))) for i=1:3],
+    girl,
+    boy
 )
 
 main_loop!(board, sprites)
