@@ -303,8 +303,15 @@ const tree = '🌴'
 
 # join(Char.(Int('🕐') .+ (0:11)))
 clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
-#fruits = collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")
-fruits = collect("🍌🍒")
+fruits = collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")
+#fruits = collect("🍌🍒")
+flowers = collect("💮🌼💐🌺🌹🌸🌷🌻🏵")
+plants = collect("🌲🌳🌱🌴🌵🌴🌳🌿🍀🍁🍂🍄")
+food = collect("🌽🌾")
+treasure = collect("💰")
+animals = collect("🐇🐝🐞🐤🐥🐦🐧🐩🐪🐫")
+water_animals = collect("🐬🐳🐙🐊🐋🐟🐠🐡")
+buildings = collect("🏰🏯🏪🏫🏬🏭")
 
 function printboard(io, cs)
     print(io, "\e[1;1H", "\e[J")
@@ -352,7 +359,7 @@ end
 # board initialization
 function addrand!(cs, c, prob::Real)
     for i = 1:length(cs)
-        if rand() < prob
+        if rand() < prob && cs[i] == ' '
             cs[i] = c
         end
     end
@@ -442,7 +449,18 @@ width = swidth ÷ 2
 
 board = fill(' ', height, width)
 #addrand!(board, '💩', 100)
-addrand!(board, brick, 0.6)
+addrand!(board, brick, 0.5)
+# A few steps to create correlated noise
+for k=1:3
+    for i = 1:size(board,1), j=1:size(board,2)
+        i2 = clamp(i + rand(-1:1), 1, size(board,1))
+        j2 = clamp(j + rand(-1:1), 1, size(board,2))
+        c = board[i2, j2]
+        if board[i,j] != c
+            board[i,j] = c
+        end
+    end
+end
 addrand!(board, cupcake, 0.02)
 addrand!(board, '🍕', 0.05)
 addrand!(board, tree, 0.01)
