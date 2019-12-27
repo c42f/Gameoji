@@ -1,6 +1,7 @@
 module Gameoji
 
 using StaticArrays
+using Crayons
 #using Revise
 using Logging
 
@@ -356,15 +357,6 @@ function draw(board, sprites)
     print(sprint(printboard, screen))
 end
 
-# board initialization
-function addrand!(cs, c, prob::Real)
-    for i = 1:length(cs)
-        if rand() < prob && cs[i] == ' '
-            cs[i] = c
-        end
-    end
-end
-
 function rawmode(f, term)
     raw_mode_enabled = TerminalMenus.enableRawMode(term)
     try
@@ -404,7 +396,8 @@ function main_loop!(board, sprites)
                         end
                         key = read_key()
                         if key == CTRL_C
-                            draw(fill(' ', size(board)), [])
+                            # Clear
+                            println("\e[1;1H\e[J")
                             return
                         end
                         flush(io) # Hack!
@@ -443,14 +436,24 @@ function main_loop!(board, sprites)
     end
 end
 
+# board initialization
+function addrand!(cs, c, prob::Real)
+    for i = 1:length(cs)
+        if rand() < prob && cs[i] == ' '
+            cs[i] = c
+        end
+    end
+end
+
 sheight,swidth = displaysize(stdout)
 height = sheight - 1
 width = swidth ÷ 2
 
-board = fill(' ', height, width)
-#addrand!(board, '💩', 100)
-addrand!(board, brick, 0.5)
+#=
+# Level of correllated noise
 # A few steps to create correlated noise
+#board = fill(' ', height, width)
+#addrand!(board, brick, 0.5)
 for k=1:3
     for i = 1:size(board,1), j=1:size(board,2)
         i2 = clamp(i + rand(-1:1), 1, size(board,1))
@@ -461,6 +464,11 @@ for k=1:3
         end
     end
 end
+=#
+
+include("maze_levels.jl")
+board = generate_maze(height, width)
+
 addrand!(board, cupcake, 0.02)
 addrand!(board, '🍕', 0.05)
 addrand!(board, tree, 0.01)
@@ -483,7 +491,11 @@ sprites = vcat(
     boy
 )
 
+
+#printboard(stdout, generate_maze(height, width))
+
 main_loop!(board, sprites)
 
 end
 
+nothing
