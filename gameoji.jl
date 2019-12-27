@@ -1,3 +1,9 @@
+#!/bin/bash
+#=
+exec julia --project=. -e 'include(popfirst!(ARGS))' \
+    "${BASH_SOURCE[0]}" "$@"
+=#
+
 module Gameoji
 
 using StaticArrays
