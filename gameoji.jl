@@ -364,7 +364,7 @@ function pad_sidebar(str, width)
     end
 end
 
-const sidebar_width = 5
+const sidebar_width = 6
 
 function printboard(io, cs, left_sidebar=nothing, right_sidebar=nothing)
     print(io, "\e[1;1H", "\e[J")
@@ -403,7 +403,7 @@ function draw(board, sprites)
             if j > length(sidebar)
                 break
             end
-            sidebar[j] = "$(item)×$(count)"
+            sidebar[j] = "$(item)$(lpad(count,3))"
         end
     end
     print(stdout, sprint(printboard, screen, left_sidebar, right_sidebar))
@@ -441,8 +441,11 @@ function main_loop!(board, sprites)
             rawmode(term) do
                 in_stream = term.in_stream
                 while true
-                    draw(board, sprites)
-                    sleep(0.1)
+                    if bytesavailable(in_stream) == 0
+                        # Avoid repeated input lag by only drawing when no
+                        # bytes are available.
+                        draw(board, sprites)
+                    end
                     key = read_key()
                     if key == CTRL_C
                         # Clear
