@@ -534,7 +534,7 @@ push!(boy.items, '💣')
 
 sprites = vcat(
     [Dog((rand(1:height),rand(1:width))) for i=1:4],
-    [ExplodingPineapple((rand(1:height),rand(1:width))) for i=1:30],
+    [ExplodingPineapple((rand(1:height),rand(1:width))) for i=1:3],
     girl,
     boy,
 )
