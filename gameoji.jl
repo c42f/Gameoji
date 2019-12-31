@@ -313,15 +313,17 @@ const tree = '🌴'
 
 # join(Char.(Int('🕐') .+ (0:11)))
 clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
+moons = collect("🌑🌒🌓🌔🌕🌖🌗🌘")
 fruits = collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")
 #fruits = collect("🍌🍒")
 flowers = collect("💮🌼💐🌺🌹🌸🌷🌻🏵")
 plants = collect("🌲🌳🌱🌴🌵🌴🌳🌿🍀🍁🍂🍄")
 food = collect("🌽🌾")
-treasure = collect("💰")
+treasure = collect("💰💎")
 animals = collect("🐇🐝🐞🐤🐥🐦🐧🐩🐪🐫")
 water_animals = collect("🐬🐳🐙🐊🐋🐟🐠🐡")
-buildings = collect("🏰🏯🏪🏫🏬🏭")
+buildings = collect("🏰🏯🏪🏫🏬🏭🏥")
+monsters = collect("👻👺👹👽🧟")
 
 # Emoji should always be two characters wide, but gnome-terminal in ubuntu
 # 18.04 considers some of them to be one character wide. Presumably due to
