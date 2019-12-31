@@ -117,19 +117,20 @@ function Dog(pos)
 end
 
 
-mutable struct Clock <: Sprite
+const ticking_clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
+mutable struct ExplodingClock <: Sprite
     pos::Vec
     time::Int
 end
-Clock(pos) = Clock(pos, 0)
-icon(c::Clock) = clocks[mod1(c.time, length(clocks))]
+ExplodingClock(pos) = ExplodingClock(pos, 0)
+icon(c::ExplodingClock) = ticking_clocks[mod1(c.time, length(ticking_clocks))]
 
 
 mutable struct Boom <: Sprite
     pos::Vec
     time::Int
 end
-Boom(pos) = Boom(pos, 1)
+Boom(pos) = Boom(pos, 0)
 icon(::Boom) = '💥'
 
 
@@ -137,13 +138,6 @@ mutable struct Balloon <: Sprite
     pos::Vec
 end
 icon(::Balloon) = '🎈'
-
-
-struct Grave <: Sprite
-    pos::Vec
-end
-# Fixme... why doesn't skull & crossbones or coffin work?
-icon(::Grave) = '💀'
 
 
 struct ExplodingPineapple <: Sprite
@@ -176,6 +170,9 @@ function keymap(::Boy, inchar)
 end
 
 function propose_action!(player::Player, board, sprites, p0, inchar)
+    if icon(player) == '💀'
+        return p0
+    end
     action = keymap(player, inchar)
     p = p0
     if action == :use_bomb
@@ -183,8 +180,7 @@ function propose_action!(player::Player, board, sprites, p0, inchar)
             # FIXME it's weird to push clocks onto the sprites list here
             x = pop!(player.items, '💣')
             if !isnothing(x)
-                push!(sprites, Clock(player.pos))
-                #board[p0...] = '⏰'
+                push!(sprites, ExplodingClock(player.pos))
             end
         end
     elseif action == :up
@@ -200,8 +196,12 @@ function propose_action!(player::Player, board, sprites, p0, inchar)
 end
 
 function transition!(girl::Girl, board, pos)
-    girl.pos = pos
     c = board[pos...]
+    if c == '💥'
+        girl.icon = '💀'
+        return girl
+    end
+    girl.pos = pos
     if c == '🧁'
         board[pos...] = ' '
         return [girl, Balloon(pos)]
@@ -213,8 +213,6 @@ function transition!(girl::Girl, board, pos)
     elseif c == '💩'
         board[pos...] = ' '
         girl.icon = '🤮'
-    elseif c == '💥'
-        return Grave(pos)
     end
     if girl.icon == '🤮' && c == '💧'
         girl.icon = girl.base_icon
@@ -223,18 +221,26 @@ function transition!(girl::Girl, board, pos)
 end
 
 function transition!(boy::Boy, board, pos)
-    boy.pos = pos
     c = board[pos...]
+    if c == '💥'
+        boy.icon = '💀'
+        return boy
+    end
+    boy.pos = pos
     if c == '🍕'
         board[pos...] = ' '
         return [boy, Balloon(pos)]
     elseif c in ('💣',fruits...)
         push!(boy.items, c)
         board[pos...] = ' '
-    elseif c == '💥'
-        return Grave(pos)
     end
     return boy
+end
+
+function propose_action!(dog::Dog, board, sprites, p0, inchar)
+    # Random step move
+    d = rand(Vec[(1,0), (-1,0), (0,1), (0,-1)])
+    return p0 .+ d
 end
 
 function transition!(dog::Dog, board, pos)
@@ -252,27 +258,24 @@ function transition!(dog::Dog, board, pos)
     return dog
 end
 
-function propose_action!(dog::Dog, board, sprites, p0, inchar)
-    # Random step move
-    d = rand(Vec[(1,0), (-1,0), (0,1), (0,-1)])
-    return p0 .+ d
+function propose_action!(b::Boom, board, sprites, p0, inchar)
+    return p0
 end
 
 function transition!(b::Boom, board, pos)
-    if b.time == 1
+    if b.time == 0
         board[b.pos...] = '💥'
-    end
-    b.time += 1
-    if b.time == 3
+    elseif b.time == 1
         board[b.pos...] = ' '
         return nothing
     end
+    b.time += 1
     return b
 end
 
-function transition!(clock::Clock, board, pos)
+function transition!(clock::ExplodingClock, board, pos)
     clock.time += 1
-    if clock.time == 12
+    if clock.time > length(ticking_clocks)
         return [Boom(pos .+ (i,j)) for i = -1:1, j=-1:1]
     end
     return clock
@@ -320,16 +323,59 @@ animals = collect("🐇🐝🐞🐤🐥🐦🐧🐩🐪🐫")
 water_animals = collect("🐬🐳🐙🐊🐋🐟🐠🐡")
 buildings = collect("🏰🏯🏪🏫🏬🏭")
 
-function printboard(io, cs)
+# Emoji should always be two characters wide, but gnome-terminal in ubuntu
+# 18.04 considers some of them to be one character wide. Presumably due to
+# mismatched unicode versions.
+# See https://bugs.launchpad.net/ubuntu/+source/gnome-terminal/+bug/1665140
+function pad_emoji_string(str, expand_narrow_chars)
+    io = IOBuffer()
+    for c in str
+        print(io, c)
+        if (expand_narrow_chars && textwidth(c) == 1) || c in (cupcake, brick)
+            print(io, ' ')
+        end
+    end
+    String(take!(io))
+end
+
+# Screen layout
+#
+# B - main board
+# L - left sidebar
+# R - right sidebar
+#
+# LL BBBBBB RR
+# LL BBBBBB RR
+# LL BBBBBB RR
+# LL BBBBBB RR
+
+function pad_sidebar(str, width)
+    if isempty(str)
+        return ' '^width
+    end
+    ws = cumsum(textwidth.(collect(str)))
+    n = findfirst(>=(width), ws)
+    if !isnothing(n)
+        return first(str, n)
+    else
+        return str * ' '^(width - ws[end])
+    end
+end
+
+const sidebar_width = 5
+
+function printboard(io, cs, left_sidebar=nothing, right_sidebar=nothing)
     print(io, "\e[1;1H", "\e[J")
               #homepos   #clear
     for i=1:size(cs,1)
-        for j=1:size(cs,2)
-            c = cs[i,j]
-            print(io, c)
-            if textwidth(c) == 1 || c in (cupcake, brick)
-                print(io, ' ')
-            end
+        if !isnothing(left_sidebar)
+            lc = pad_sidebar(left_sidebar[i], sidebar_width-1)
+            print(io, pad_emoji_string(lc, false), '│')
+        end
+        print(io, pad_emoji_string(vec([cs[i,:]; ]), true))
+        if !isnothing(right_sidebar)
+            rc = pad_sidebar(right_sidebar[i], sidebar_width-1)
+            print(io, '│', pad_emoji_string(rc, false))
         end
         i != size(cs,1) && println(io)
     end
@@ -338,29 +384,27 @@ end
 function draw(board, sprites)
     io = IOBuffer()
     # Compose screen & print it
-    screen = fill(' ', size(board,1)+1, size(board,2))
-    screen[1:end-1, :] = board
+    screen = copy(board)
+    # Draw sprites on top of background
     for obj in sprites
         screen[obj.pos...] = icon(obj)
     end
     players = [s for s in sprites if s isa Player]
-    n_players = length(players)
+    # Overdraw players so they're always on top
     for (i,person) in enumerate(players)
-        # Players on top of objects
         screen[person.pos...] = icon(person)
-        j = 1 + (i-1)*size(screen,2) ÷ n_players
-        screen[end, j] = icon(person)
-        screen[end, j+1] = '|'
-        j += 2
-        for (item,cnt) in person.items
-            str = "$(item)×$(cnt) "
-            # FIXME: Proper drawing of state which doesn't crash...
-            jend = clamp(j+length(str)-1, 1, size(screen,2))
-            screen[end,j:jend] .= collect(str)[1:jend-j+1]
-            j += length(str)
+    end
+    left_sidebar = fill("", size(board,1))
+    right_sidebar = fill("", size(board,1))
+    for (i,(person, sidebar)) in enumerate(zip(players, [left_sidebar, right_sidebar]))
+        for (j,(item,count)) in enumerate(person.items)
+            if j > length(sidebar)
+                break
+            end
+            sidebar[j] = "$(item)×$(count)"
         end
     end
-    print(sprint(printboard, screen))
+    print(stdout, sprint(printboard, screen, left_sidebar, right_sidebar))
 end
 
 function rawmode(f, term)
@@ -390,52 +434,48 @@ end
 
 function main_loop!(board, sprites)
     term = TerminalMenus.terminal
-    open("log.txt", "w") do io
-        with_logger(ConsoleLogger(io)) do
+    open("log.txt", "w") do logio
+        with_logger(ConsoleLogger(logio)) do
             rawmode(term) do
                 in_stream = term.in_stream
-                try
-                    while true
-                        if bytesavailable(in_stream) == 0
-                            draw(board, sprites)
-                            sleep(0.1)
+                while true
+                    draw(board, sprites)
+                    sleep(0.1)
+                    key = read_key()
+                    if key == CTRL_C
+                        # Clear
+                        println("\e[1;1H\e[J")
+                        return
+                    end
+                    flush(logio) # Hack!
+                    new_positions = []
+                    for obj in sprites
+                        p0 = obj.pos
+                        p1 = propose_action!(obj, board, sprites, p0, key)
+                        p1 = clampmove(board, p1)
+                        # You can climb onto the bricks from the tree
+                        # HACK
+                        if !(obj isa Balloon) && board[p1...] == brick && !(board[p0...] in (tree,brick))
+                            p1 = p0
                         end
-                        key = read_key()
-                        if key == CTRL_C
-                            # Clear
-                            println("\e[1;1H\e[J")
-                            return
-                        end
-                        flush(io) # Hack!
-                        sprites_new = []
-                        for obj in sprites
-                            p0 = obj.pos
-                            p1 = propose_action!(obj, board, sprites, p0, key)
-                            p1 = clampmove(board, p1)
-                            # You can climb onto the bricks from the tree
-                            # HACK
-                            if !(obj isa Balloon) && board[p1...] == brick && !(board[p0...] in (tree,brick))
-                                p1 = p0
+                        push!(new_positions, p1)
+                    end
+                    sprites_new = []
+                    for (p1,obj) in zip(new_positions,sprites)
+                        obj = transition!(obj, board, p1)
+                        if !isnothing(obj)
+                            if obj isa AbstractArray
+                                append!(sprites_new, obj)
+                            else
+                                obj::Sprite
+                                push!(sprites_new, obj)
                             end
-                            obj = transition!(obj, board, p1)
-                            if !isnothing(obj)
-                                if obj isa AbstractArray
-                                    append!(sprites_new, obj)
-                                else
-                                    obj::Sprite
-                                    push!(sprites_new, obj)
-                                end
-                            end
-                        end
-                        sprites = filter(sprites_new) do s
-                            p = s.pos
-                            1 <= p[1] <= size(board,1) && 1 <= p[2] <= size(board,2)
                         end
                     end
-                catch exc
-                    exc isa InterruptException || rethrow()
-                    nothing
-                finally
+                    sprites = filter(sprites_new) do s
+                        p = s.pos
+                        1 <= p[1] <= size(board,1) && 1 <= p[2] <= size(board,2)
+                    end
                 end
             end
         end
@@ -452,8 +492,8 @@ function addrand!(cs, c, prob::Real)
 end
 
 sheight,swidth = displaysize(stdout)
-height = sheight - 1
-width = swidth ÷ 2
+height = sheight
+width = (swidth - sidebar_width*2) ÷ 2
 
 #=
 # Level of correllated noise
@@ -492,9 +532,9 @@ push!(boy.items, '💣')
 
 sprites = vcat(
     [Dog((rand(1:height),rand(1:width))) for i=1:4],
-    [ExplodingPineapple((rand(1:height),rand(1:width))) for i=1:3],
+    [ExplodingPineapple((rand(1:height),rand(1:width))) for i=1:30],
     girl,
-    boy
+    boy,
 )
 
 
