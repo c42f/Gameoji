@@ -133,6 +133,9 @@ end
 Boom(pos) = Boom(pos, 0)
 icon(::Boom) = '💥'
 
+function explosion(pos, radius)
+    [Boom(pos .+ (i,j)) for i = -radius:radius, j=-radius:radius]
+end
 
 mutable struct Balloon <: Sprite
     pos::Vec
@@ -276,7 +279,7 @@ end
 function transition!(clock::ExplodingClock, board, pos)
     clock.time += 1
     if clock.time > length(ticking_clocks)
-        return [Boom(pos .+ (i,j)) for i = -1:1, j=-1:1]
+        return explosion(pos, 1)
     end
     return clock
 end
@@ -298,7 +301,7 @@ end
 
 function transition!(ep::ExplodingPineapple, board, pos)
     if rand() < 0.01
-        return [Boom(pos .+ Vec(i,j)) for i = -1:1, j=-1:1]
+        return explosion(pos, 1)
     end
     return ep
 end
