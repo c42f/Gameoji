@@ -14,9 +14,11 @@ using Logging
 using TerminalMenus
 using TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
 
-CTRL_C = Char(3)
+include("types.jl")
+include("display.jl")
+include("maze_levels.jl")
 
-const Vec = SVector{2,Int}
+CTRL_C = Char(3)
 
 function clampmove(board, p)
     (clamp(p[1], 1, size(board,1)),
@@ -187,13 +189,13 @@ function propose_action!(player::Player, board, sprites, p0, inchar)
             end
         end
     elseif action == :up
-        p += Vec(-1, 0)
-    elseif action == :down
-        p += Vec(1, 0)
-    elseif action == :left
-        p += Vec(0, -1)
-    elseif action == :right
         p += Vec(0, 1)
+    elseif action == :down
+        p += Vec(0, -1)
+    elseif action == :left
+        p += Vec(-1, 0)
+    elseif action == :right
+        p += Vec(1, 0)
     end
     return p
 end
@@ -287,11 +289,11 @@ end
 
 function propose_action!(balloon::Balloon, board, sprites, p0, inchar)
     # Balloons float to top
-    p0 .+ Vec(-1,0)
+    p0 .+ Vec(0,1)
 end
 
 function transition!(balloon::Balloon, board, pos)
-    if pos[1] == 1
+    if pos[1] == size(board,2)
         return Boom(pos)
     end
     balloon.pos = pos
@@ -308,12 +310,6 @@ end
 
 
 #-------------------------------------------------------------------------------
-
-# Some emoji chars for which textwidth is incorrect (??)
-const brick = '🧱'
-const cupcake = '🧁'
-const tree = '🌴'
-
 # join(Char.(Int('🕐') .+ (0:11)))
 clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
 moons = collect("🌑🌒🌓🌔🌕🌖🌗🌘")
@@ -328,64 +324,6 @@ water_animals = collect("🐬🐳🐙🐊🐋🐟🐠🐡")
 buildings = collect("🏰🏯🏪🏫🏬🏭🏥")
 monsters = collect("👻👺👹👽🧟")
 
-# Emoji should always be two characters wide, but gnome-terminal in ubuntu
-# 18.04 considers some of them to be one character wide. Presumably due to
-# mismatched unicode versions.
-# See https://bugs.launchpad.net/ubuntu/+source/gnome-terminal/+bug/1665140
-function pad_emoji_string(str, expand_narrow_chars)
-    io = IOBuffer()
-    for c in str
-        print(io, c)
-        if (expand_narrow_chars && textwidth(c) == 1) || c in (cupcake, brick)
-            print(io, ' ')
-        end
-    end
-    String(take!(io))
-end
-
-# Screen layout
-#
-# B - main board
-# L - left sidebar
-# R - right sidebar
-#
-# LL BBBBBB RR
-# LL BBBBBB RR
-# LL BBBBBB RR
-# LL BBBBBB RR
-
-function pad_sidebar(str, width)
-    if isempty(str)
-        return ' '^width
-    end
-    ws = cumsum(textwidth.(collect(str)))
-    n = findfirst(>=(width), ws)
-    if !isnothing(n)
-        return first(str, n)
-    else
-        return str * ' '^(width - ws[end])
-    end
-end
-
-const sidebar_width = 6
-
-function printboard(io, cs, left_sidebar=nothing, right_sidebar=nothing)
-    print(io, "\e[1;1H", "\e[J")
-              #homepos   #clear
-    for i=1:size(cs,1)
-        if !isnothing(left_sidebar)
-            lc = pad_sidebar(left_sidebar[i], sidebar_width-1)
-            print(io, pad_emoji_string(lc, false), '│')
-        end
-        print(io, pad_emoji_string(vec([cs[i,:]; ]), true))
-        if !isnothing(right_sidebar)
-            rc = pad_sidebar(right_sidebar[i], sidebar_width-1)
-            print(io, '│', pad_emoji_string(rc, false))
-        end
-        i != size(cs,1) && println(io)
-    end
-end
-
 function draw(board, sprites)
     io = IOBuffer()
     # Compose screen & print it
@@ -399,16 +337,17 @@ function draw(board, sprites)
     for (i,person) in enumerate(players)
         screen[person.pos...] = icon(person)
     end
-    left_sidebar = fill("", size(board,1))
-    right_sidebar = fill("", size(board,1))
+    left_sidebar = fill("", size(board,2))
+    right_sidebar = fill("", size(board,2))
     for (i,(person, sidebar)) in enumerate(zip(players, [left_sidebar, right_sidebar]))
         for (j,(item,count)) in enumerate(person.items)
             if j > length(sidebar)
                 break
             end
-            sidebar[j] = "$(item)$(lpad(count,3))"
+            sidebar[end+1-j] = "$(item)$(lpad(count,3))"
         end
     end
+    clear_screen(stdout)
     print(stdout, sprint(printboard, screen, left_sidebar, right_sidebar))
 end
 
@@ -520,8 +459,7 @@ for k=1:3
 end
 =#
 
-include("maze_levels.jl")
-board = generate_maze(height, width)
+board = generate_maze((width,height))
 
 addrand!(board, cupcake, 0.02)
 addrand!(board, '🍕', 0.05)
@@ -532,15 +470,15 @@ for f in fruits
     addrand!(board, f, 0.01)
 end
 
-middle = (height÷2, width÷2)
+middle = size(board) .÷ 2
 girl = Girl(middle)
 boy = Boy(middle)
 push!(girl.items, '💣')
 push!(boy.items, '💣')
 
 sprites = vcat(
-    [Dog((rand(1:height),rand(1:width))) for i=1:4],
-    [ExplodingPineapple((rand(1:height),rand(1:width))) for i=1:3],
+    [Dog((rand(1:width),rand(1:height))) for i=1:4],
+    [ExplodingPineapple((rand(1:width),rand(1:height))) for i=1:3],
     girl,
     boy,
 )
