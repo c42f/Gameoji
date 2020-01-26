@@ -10,6 +10,9 @@ using StaticArrays
 using Crayons
 #using Revise
 using Logging
+using LinearAlgebra
+using Distributions
+using JLD2
 
 using TerminalMenus
 using TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT

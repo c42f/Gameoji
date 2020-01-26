@@ -24,29 +24,54 @@ function observe_env(board, pos, d, fill_val)
             end
         end
     end
-    if d == SA[1,0]
+    if d == SA[-1,0]
+        env = rot180(env)
+    elseif d == SA[0,1]
         env = rotr90(env)
     elseif d == SA[0,-1]
-        env = rot180(env)
-    elseif d == SA[-1,0]
         env = rotl90(env)
     end
     SMatrix(env)
 end
 
-function choose_direction(coeffs, d, traversable)
-    transition = coeffs * vec(traversable)
-    action = argmax(transition)
+function softmax(xs)
+    e = exp.(xs)
+    e ./ sum(e)
+end
+
+@generated function Base.cumsum(a::StaticVector{N}) where {N}
+    N > 0 || return :a
+    es = [Symbol("e$i") for i=1:N]
+    vals = [:(e1 = a[1])]
+    for i=2:N
+        push!(vals, :($(es[i]) = $(es[i-1]) + a[$i]))
+    end
+    quote
+        $(vals...)
+        elems = tuple($(es...))
+        StaticArrays._construct_similar(a, Size(a), elems)
+    end
+end
+
+function perceptron(coeffs, temperature, d, environment)
+    action_probs = softmax((coeffs * vec(environment)) ./ temperature)
+    #cdf = cumsum(action_probs)
+    #action = findfirst(rand() .< cdf)
+    action = argmax(action_probs)
     new_d = (d, rot90p(d), rot90m(d))[action]
 end
 
 function generate_maze(boardsize)
+    @load "perceptrons_1.jld2" perceptrons
+    quality_dist = Categorical(normalize(first.(perceptrons), 1))
     board = fill(' ', boardsize)
+    coeffs = last(perceptrons[rand(quality_dist)])
+    #coeffs = randn(3,25)
+    run_walkers(board, (d, env)->perceptron(coeffs, 1.0, d, env))
+    return board
+end
 
-    # RL problem where the goal is for the agent to live as long as possible??
-
-    coeffs = randn(3,25)
-
+function run_walkers(board, choose_direction)
     while sum(board .== brick) <= 0.4*prod(size(board))
         # Choose initial position, not surrounded by bricks
         pos = Vec(0,0)
@@ -62,23 +87,25 @@ function generate_maze(boardsize)
         end
         d = rand((Vec(1,0), Vec(-1,0), Vec(0,1), Vec(0,-1)))
         for i=1:100
-            out_of_bounds = Char(0)
-            env = observe_env(board, pos, d, out_of_bounds)
+            env = observe_env(board, pos, d, Char(0))
             traversable = env .== ' '
-            d = choose_direction(coeffs, d, traversable)
+            d = choose_direction(d, traversable)
             pos += d
             if !in_board(board, pos)
                 break
             end
             board[pos...] = brick
-            #clear_screen(stdout)
-            #printboard(stdout, board)
-            #print(stdout, Crayon(background=:blue), "\n")
-            #printboard(stdout, env)
-            #print(stdout, Crayon(reset=true))
-            ##display(pos)
-            ##display(traversable)
-            #sleep(0.51)
+            # clear_screen(stdout)
+            # printboard(stdout, board)
+            # print(stdout, Crayon(background=:blue))
+            # println(stdout)
+            # println(stdout, "-----")
+            # printboard(stdout, env)
+            # println(stdout, "\n-----")
+            # print(stdout, Crayon(reset=true))
+            # #display(pos)
+            # #display(traversable)
+            # sleep(0.51)
         end
     end
 
