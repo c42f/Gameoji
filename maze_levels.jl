@@ -35,7 +35,7 @@ function observe_env(board, pos, d, fill_val)
 end
 
 function softmax(xs)
-    e = exp.(xs)
+    e = exp.(xs .- maximum(xs))
     e ./ sum(e)
 end
 
@@ -54,10 +54,10 @@ end
 end
 
 function perceptron(coeffs, temperature, d, environment)
-    action_probs = softmax((coeffs * vec(environment)) ./ temperature)
-    #cdf = cumsum(action_probs)
-    #action = findfirst(rand() .< cdf)
-    action = argmax(action_probs)
+    action_weights = (coeffs * vec(environment)) ./ temperature
+    action_probs = softmax(action_weights)
+    action = findfirst(rand() .< cumsum(action_probs))
+    #action = argmax(action_probs)
     new_d = (d, rot90p(d), rot90m(d))[action]
 end
 
@@ -72,7 +72,7 @@ function generate_maze(boardsize)
 end
 
 function run_walkers(board, choose_direction)
-    while sum(board .== brick) <= 0.4*prod(size(board))
+    while sum(==(' '), board) > 0.6*length(board)
         # Choose initial position, not surrounded by bricks
         pos = Vec(0,0)
         while true
@@ -86,6 +86,7 @@ function run_walkers(board, choose_direction)
             end
         end
         d = rand((Vec(1,0), Vec(-1,0), Vec(0,1), Vec(0,-1)))
+        c = brick
         for i=1:100
             env = observe_env(board, pos, d, Char(0))
             traversable = env .== ' '
@@ -94,7 +95,7 @@ function run_walkers(board, choose_direction)
             if !in_board(board, pos)
                 break
             end
-            board[pos...] = brick
+            board[pos...] = c
             # clear_screen(stdout)
             # printboard(stdout, board)
             # print(stdout, Crayon(background=:blue))
