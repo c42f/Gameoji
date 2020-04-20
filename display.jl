@@ -53,7 +53,7 @@ function printboard(io, board, left_sidebar=nothing, right_sidebar=nothing)
     for i=size(board,2):-1:1
         if !isnothing(left_sidebar)
             lc = pad_sidebar(left_sidebar[i], sidebar_width-1)
-            print(io, pad_emoji_string(lc, false), i==size(board,2)-2 ? '◄' : '│')
+            print(io, pad_emoji_string(lc, false), '│')
         end
         print(io, pad_emoji_string(board[:,i], true))
         if !isnothing(right_sidebar)
