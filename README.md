@@ -41,5 +41,5 @@ levels are randomly generated each time.
 ## Controls
 
 The girl and boy emoji both have controls on the same keyboard — WASD and arrow
-keys respectively to move, and `1` and `Enter` to drop a bomb.
+keys respectively to move, and `1` and `0` to drop a bomb.
 
