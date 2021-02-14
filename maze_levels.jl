@@ -39,20 +39,6 @@ function softmax(xs)
     e ./ sum(e)
 end
 
-@generated function Base.cumsum(a::StaticVector{N}) where {N}
-    N > 0 || return :a
-    es = [Symbol("e$i") for i=1:N]
-    vals = [:(e1 = a[1])]
-    for i=2:N
-        push!(vals, :($(es[i]) = $(es[i-1]) + a[$i]))
-    end
-    quote
-        $(vals...)
-        elems = tuple($(es...))
-        StaticArrays._construct_similar(a, Size(a), elems)
-    end
-end
-
 function perceptron(coeffs, temperature, d, environment)
     action_weights = (coeffs * vec(environment)) ./ temperature
     action_probs = softmax(action_weights)
