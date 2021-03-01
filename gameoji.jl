@@ -18,10 +18,32 @@ using TerminalMenus
 using TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
 
 include("types.jl")
-include("display.jl")
+include("terminal.jl")
 include("maze_levels.jl")
 
 CTRL_C = Char(3)
+
+# Board redesign:
+#
+# Multiple layers:
+# * Explosion
+# * Height (players can move +0.5 in height)
+#
+# * Sprite list, contains all "objects"
+#
+# Update pass:
+#
+# board = Board(
+#     height = zeros(boardsize),
+#     explosion = falses(boardsize),
+#     ...
+# )
+#
+# for object in objects
+#     update_board!(board, object)
+#     evolve_dynamics(board.explosion)
+# end
+
 
 function clampmove(board, p)
     (clamp(p[1], 1, size(board,1)),
@@ -328,7 +350,6 @@ buildings = collect("🏰🏯🏪🏫🏬🏭🏥")
 monsters = collect("👻👺👹👽🧟")
 
 function draw(board, sprites)
-    io = IOBuffer()
     # Compose screen & print it
     screen = copy(board)
     # Draw sprites on top of background
@@ -352,31 +373,6 @@ function draw(board, sprites)
     end
     clear_screen(stdout)
     print(stdout, sprint(printboard, screen, left_sidebar, right_sidebar))
-end
-
-function rawmode(f, term)
-    raw_mode_enabled = TerminalMenus.enableRawMode(term)
-    try
-        # Stolen from TerminalMenus
-        raw_mode_enabled && print(term.out_stream, "\x1b[?25l") # hide the cursor
-        f()
-    finally
-        if raw_mode_enabled
-            print(term.out_stream, "\x1b[?25h") # unhide cursor
-            TerminalMenus.disableRawMode(term)
-        end
-    end
-end
-
-function read_key()
-    k = TerminalMenus.readKey()
-    if k in Int.((ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT))
-        return TerminalMenus.Key(k)
-    elseif k == 3 #=^C=#
-        return CTRL_C
-    else
-        return Char(k)
-    end
 end
 
 function main_loop!(board, sprites)

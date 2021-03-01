@@ -64,3 +64,28 @@ function printboard(io, board, left_sidebar=nothing, right_sidebar=nothing)
     end
 end
 
+function rawmode(f, term)
+    raw_mode_enabled = TerminalMenus.enableRawMode(term)
+    try
+        # Stolen from TerminalMenus
+        raw_mode_enabled && print(term.out_stream, "\x1b[?25l") # hide the cursor
+        f()
+    finally
+        if raw_mode_enabled
+            print(term.out_stream, "\x1b[?25h") # unhide cursor
+            TerminalMenus.disableRawMode(term)
+        end
+    end
+end
+
+function read_key()
+    k = TerminalMenus.readKey()
+    if k in Int.((ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT))
+        return TerminalMenus.Key(k)
+    elseif k == 3 #=^C=#
+        return CTRL_C
+    else
+        return Char(k)
+    end
+end
+
