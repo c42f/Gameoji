@@ -14,14 +14,9 @@ using LinearAlgebra
 using Distributions
 using JLD2
 
-using TerminalMenus
-using TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
-
 include("types.jl")
 include("terminal.jl")
 include("maze_levels.jl")
-
-CTRL_C = Char(3)
 
 # Board redesign:
 #

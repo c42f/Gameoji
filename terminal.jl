@@ -1,3 +1,8 @@
+using TerminalMenus
+
+using TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
+const CTRL_C = Char(3)
+
 # Some emoji chars for which textwidth is incorrect (??)
 const brick = '🧱'
 const cupcake = '🧁'
