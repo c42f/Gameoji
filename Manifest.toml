@@ -158,7 +158,9 @@ version = "1.4.0"
 
 [[Overseer]]
 deps = ["Parameters"]
-git-tree-sha1 = "17cc98161cf88d5b2fddb1dbc1a8c037af6385c5"
+git-tree-sha1 = "5ff5bab1d81fb87cf742009f987d0127c986215b"
+repo-rev = "cb97b565506e751a0b45111cc9ba5371f7b470a8"
+repo-url = "https://github.com/c42f/Overseer.jl"
 uuid = "1ada24be-c16d-4464-9f61-27c2e0f16645"
 version = "0.1.1"
 
