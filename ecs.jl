@@ -306,7 +306,6 @@ function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
             elseif r === :die
                 # TODO: Set movement disabled property?
                 sprite[e] = SpriteComp('💀', sprite[e].draw_priority)
-                schedule_delete!(m, e)
             elseif r === :explode
                 for i=-1:1, j=-1:1
                     Entity(m, SpatialComp(pos + VI[i,j], VI[0,0]),
@@ -332,11 +331,12 @@ end
 
 struct PlayerRightControlUpdate <: System end
 
-Overseer.requested_components(::PlayerRightControlUpdate) = (SpatialComp, PlayerRightControlComp,)
+Overseer.requested_components(::PlayerRightControlUpdate) = (SpatialComp, PlayerRightControlComp, SpriteComp)
 
 function Overseer.update(::PlayerRightControlUpdate, m::AbstractLedger)
 	spatial_comp = m[SpatialComp]
 	control_comp = m[PlayerRightControlComp]
+    sprite_comp = m[SpriteComp]
     key = m.input_key
     velocity = key == ARROW_UP    ? VI[0, 1] :
                key == ARROW_DOWN  ? VI[0,-1] :
@@ -344,7 +344,13 @@ function Overseer.update(::PlayerRightControlUpdate, m::AbstractLedger)
                key == ARROW_RIGHT ? VI[1, 0] :
                VI[0,0]
     use_item = key == ' '
-    for e in @entities_in(spatial_comp && control_comp)
+    for e in @entities_in(spatial_comp && control_comp && sprite_comp)
+        if sprite_comp[e].icon == '💀'
+            # Player is dead.
+            # TODO: Might want to use something other than the icon for this
+            # state machine!
+            continue
+        end
         s = spatial_comp[e]
         spatial_comp[e] = SpatialComp(s.position, velocity)
         if use_item
@@ -364,13 +370,6 @@ function Overseer.update(::PlayerRightControlUpdate, m::AbstractLedger)
                    ExplosionComp(length(clocks), 2),
                    ExplosiveReactionComp(:none)
                    )
-
-            # Fruit random walkers :-D
-            Entity(m, SpatialComp(s.position, VI[0,0]),
-                   RandomVelocityControlComp(),
-                   SpriteComp(rand(collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")), 1),
-                   TimerComp(),
-                   LifetimeComp(rand(1:10)+rand(1:10)))
         end
 	end
 end
@@ -462,7 +461,8 @@ function Overseer.update(::TerminalRenderer, m::AbstractLedger)
         end
     end
     # Render
-    printboard(m, board, left_sidebar, right_sidebar)
+    print(m.term, "\e[1;1H") # Home position
+    print(m.term, sprint(printboard, board, left_sidebar, right_sidebar))
 end
 
 #-------------------------------------------------------------------------------
@@ -495,8 +495,6 @@ function Base.show(io::IO, game::Gameoji)
     print(io, "Gameoji on $(game.board_size[1])×$(game.board_size[2]) board with $(length(game.ledger.entities) - length(game.ledger.free_entities)) current entities")
 end
 
-printboard(game::Gameoji, args...) = printboard(game.term, args...)
-
 Overseer.stages(game::Gameoji) = stages(game.ledger)
 Overseer.ledger(game::Gameoji) = game.ledger
 
@@ -528,8 +526,11 @@ function init_game(term)
         PlayerInfoComp(1),
         SpriteComp('👦', 1000),
         CollisionComp(1),
+        ExplosiveReactionComp(:die),
     )
 
+    #=
+    # Dog random walkers
     for _=1:4
         Entity(game.ledger,
             SpatialComp(VI[10,10], VI[0,0]),
@@ -539,6 +540,7 @@ function init_game(term)
             CollisionComp(1),
         )
     end
+    =#
 
     # Flocking chickens
     #boid_pos = rand_unoccupied_pos(game.board)
@@ -605,18 +607,12 @@ function main()
             rawmode(term) do
                 in_stream = term.in_stream
                 clear_screen(stdout)
+                # TODO: Try async read from stdin & timed game loop?
                 while true
                     game = init_game(term)
                     while true
                         update(game)
                         flush(logio) # Hack!
-                        #=
-                        if bytesavailable(in_stream) == 0
-                            # Avoid repeated input lag by only drawing when no
-                            # bytes are available.
-                            draw(board, sprites)
-                        end
-                        =#
                         key = read_key()
                         @info "key" key
                         if key == CTRL_C

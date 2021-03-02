@@ -85,8 +85,8 @@ function rawmode(f, term)
     end
 end
 
-function read_key()
-    k = TerminalMenus.readKey()
+function read_key(io=stdin)
+    k = TerminalMenus.readKey(io)
     if k in Int.((ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT))
         return TerminalMenus.Key(k)
     elseif k == 3 #=^C=#
