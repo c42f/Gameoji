@@ -59,6 +59,9 @@ end
 @component struct RandomVelocityControlComp
 end
 
+@component struct BoidControlComp
+end
+
 @component struct EntityKillerComp
 end
 
@@ -134,6 +137,63 @@ function Overseer.update(::RandomVelocityUpdate, m::AbstractLedger)
         spatial[e] = SpatialComp(s.position, vel)
 	end
 end
+
+# Boid control of NPCs
+
+struct BoidVelocityUpdate <: System end
+
+Overseer.requested_components(::BoidVelocityUpdate) = (SpatialComp,BoidControlComp)
+
+function Overseer.update(::BoidVelocityUpdate, m::AbstractLedger)
+	spatial = m[SpatialComp]
+    control = m[BoidControlComp]
+
+    boids = [(e,spatial[e]) for e in @entities_in(spatial && control)]
+    length(boids) > 1 || return
+
+    for e in @entities_in(spatial && control)
+        pos = spatial[e].position
+
+        # Local mean in position and velocity
+        mean_pos = SA_F64[0,0]
+        mean_vel = SA_F64[0,0]
+        sep_vel = SA_F64[0,0]
+        tot_weight = 0.0
+        sep_weight = 0.0
+        # O(N²) iteration
+        for (e2,s) in boids
+            d = pos - s.position
+            d2 = d⋅d
+            w = exp(-d2/4^2)
+            mean_pos += w*s.position
+            mean_vel += w*s.velocity
+            tot_weight += w
+            if e != e2 && d2 < 10
+                if d == 0
+                    θ = 2*π*rand()
+                    d = SA[cos(θ), sin(θ)]
+                end
+                sw = 1/(d2+0.01)
+                sep_weight += sw
+                sep_vel += sw*d
+            end
+        end
+        if tot_weight > 0
+            mean_pos = mean_pos ./ tot_weight
+            mean_vel = mean_vel ./ tot_weight
+        end
+        if sep_weight > 0
+            sep_vel  = sep_vel ./ sep_weight
+        end
+        θ = 2*π*rand()
+        rand_vel = SA[cos(θ), sin(θ)]
+        cohesion_vel = mean_pos - pos
+        norm(cohesion_vel) != 0 && (cohesion_vel = normalize(cohesion_vel))
+        vel = 0.2*cohesion_vel + 0.3*sep_vel + mean_vel + 0.5*rand_vel
+        spatial[e] = SpatialComp(pos, clamp.(round.(Int, vel), -1, 1))
+	end
+end
+
 
 # Explosions
 
@@ -275,8 +335,6 @@ function Overseer.update(::InventoryCollectionUpdate, m::AbstractLedger)
     collectors = [(pos=spatial[e].position, items=inventory[e].items)
                   for e in @entities_in(inventory && spatial)]
 
-    @info "Collectors" collectors
-
     for e in @entities_in(spatial && collectible && sprite)
         pos = spatial[e].position
         for collector in collectors
@@ -366,9 +424,9 @@ end
 function Gameoji(term)
     h,w = displaysize(stdout)
     board_size = VI[(w-2*sidebar_width)÷2, h]
-    board = generate_maze(tuple(board_size...))
+    board = fill(' ', tuple(board_size...))
     ledger = Ledger(
-        Stage(:control, [RandomVelocityUpdate(), PlayerRightControlUpdate()]),
+        Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerRightControlUpdate()]),
         Stage(:dynamics, [PositionUpdate()]),
         Stage(:lifetime, [InventoryCollectionUpdate(), LifetimeUpdate(),
                           TimedExplosion(), EntityKillUpdate()]),
@@ -379,7 +437,6 @@ function Gameoji(term)
 end
 
 function Base.show(io::IO, game::Gameoji)
-    error("Nope")
     print(io, "Gameoji on $(game.board_size[1])×$(game.board_size[2]) board with $(length(game.ledger.entities) - length(game.ledger.free_entities)) current entities")
 end
 
@@ -388,26 +445,27 @@ printboard(game::Gameoji, args...) = printboard(game.term, args...)
 Overseer.stages(game::Gameoji) = stages(game.ledger)
 Overseer.ledger(game::Gameoji) = game.ledger
 
-function seed_rand!(ledger::AbstractLedger, board, components::ComponentData...)
+function rand_unoccupied_pos(board)
     for j=1:100
         pos = VI[rand(1:size(board,1)), rand(1:size(board,2))]
         if board[pos...] == ' '
-            Entity(ledger, SpatialComp(pos, VI[0,0]),
-                   components...)
-            break
+            return pos
         end
     end
+    return nothing
+end
+
+function seed_rand!(ledger::AbstractLedger, board, components::ComponentData...)
+    pos = rand_unoccupied_pos(board)
+    !isnothing(pos) || return
+    Entity(ledger, SpatialComp(pos, VI[0,0]), components...)
 end
 
 function init_game(term)
     game = Gameoji(term)
 
-    Entity(game.ledger,
-        SpatialComp(VI[10,10], VI[0,0]),
-        RandomVelocityControlComp(),
-        SpriteComp('🐈', 10),
-        CollisionComp(1),
-    )
+    game.board = generate_maze(tuple(game.board_size...))
+
     Entity(game.ledger,
         SpatialComp(VI[10,10], VI[0,0]),
         PlayerRightControlComp(),
@@ -417,13 +475,53 @@ function init_game(term)
         CollisionComp(1),
     )
 
+    for _=1:4
+        Entity(game.ledger,
+            SpatialComp(VI[10,10], VI[0,0]),
+            RandomVelocityControlComp(),
+            SpriteComp('🐕', 10),
+            InventoryComp(),
+            CollisionComp(1),
+        )
+    end
+
+    # Flocking chickens
+    #boid_pos = rand_unoccupied_pos(game.board)
+    for _=1:30
+        seed_rand!(game.ledger, game.board,
+                   # SpatialComp(boid_pos, VI[rand(-1:1), rand(-1:1)]),
+                   #RandomVelocityControlComp(),
+                   BoidControlComp(),
+                   SpriteComp('🐔', 10),
+                   CollisionComp(1),
+                  )
+    end
+
+    # Collectibles
+    fruits = collect("🍉🍌🍏🍐🍑🍒🍓")
     for _=1:100
         seed_rand!(game.ledger, game.board,
                    CollectibleComp(),
-                   SpriteComp('💠', 2))
+                   SpriteComp(rand(fruits), 2))
+    end
+    treasure = collect("💰💎")
+    for _=1:10
+        seed_rand!(game.ledger, game.board,
+                   CollectibleComp(),
+                   SpriteComp(rand(treasure), 2))
     end
 
-    for _=1:100
+    monsters = collect("👺👹")
+    for _=1:5
+        seed_rand!(game.ledger, game.board,
+                   RandomVelocityControlComp(),
+                   EntityKillerComp(),
+                   CollisionComp(1),
+                   SpriteComp(rand(monsters), 2))
+    end
+
+    # Exploding pineapples
+    for _=1:5
         seed_rand!(game.ledger, game.board,
                    CollectibleComp(),
                    SpriteComp('🍍', 2),
@@ -439,29 +537,35 @@ include("maze_levels.jl")
 
 function main()
     term = TerminalMenus.terminal
-    game = init_game(term)
     open("log.txt", "w") do logio
         with_logger(ConsoleLogger(logio)) do
             rawmode(term) do
                 in_stream = term.in_stream
                 clear_screen(stdout)
                 while true
-                    update(game)
-                    flush(logio) # Hack!
-                    #=
-                    if bytesavailable(in_stream) == 0
-                        # Avoid repeated input lag by only drawing when no
-                        # bytes are available.
-                        draw(board, sprites)
+                    game = init_game(term)
+                    while true
+                        update(game)
+                        flush(logio) # Hack!
+                        #=
+                        if bytesavailable(in_stream) == 0
+                            # Avoid repeated input lag by only drawing when no
+                            # bytes are available.
+                            draw(board, sprites)
+                        end
+                        =#
+                        key = read_key()
+                        @info "key" key
+                        if key == CTRL_C
+                            # Clear
+                            clear_screen(stdout)
+                            return
+                        elseif key == CTRL_R
+                            clear_screen(stdout)
+                            break
+                        end
+                        game.input_key = key
                     end
-                    =#
-                    key = read_key()
-                    if key == CTRL_C
-                        # Clear
-                        clear_screen(stdout)
-                        return
-                    end
-                    game.input_key = key
                 end
             end
         end

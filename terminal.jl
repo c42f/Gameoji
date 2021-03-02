@@ -2,10 +2,12 @@ using TerminalMenus
 
 using TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
 const CTRL_C = Char(3)
+const CTRL_R = '\x12'
 
 # Some emoji chars for which textwidth is incorrect (??)
 const brick = '🧱'
 const cupcake = '🧁'
+const parrot = '🦜'
 const tree = '🌴'
 
 # Emoji should always be two characters wide, but gnome-terminal in ubuntu
@@ -16,7 +18,7 @@ function pad_emoji_string(str, expand_narrow_chars)
     io = IOBuffer()
     for c in str
         print(io, c)
-        if (expand_narrow_chars && textwidth(c) == 1) || c in (cupcake, brick)
+        if (expand_narrow_chars && textwidth(c) == 1) || c in (cupcake, brick, parrot)
             print(io, ' ')
         end
     end
