@@ -5,8 +5,10 @@ using REPL
 const Vec2I = SVector{2,Int}
 const VI = SA{Int}
 
+include("inventory.jl")
+
 #-------------------------------------------------------------------------------
-# Components
+# Components for game entities
 
 @component struct TimerComp
     time::Int
@@ -38,10 +40,15 @@ end
     radius::Int
 end
 
-@component struct PlayerComp
-    number::Int
-    items::Dict{Char,Int}
+@component struct InventoryComp
+    items::Items
 end
+
+@component struct PlayerInfoComp
+    number::Int
+end
+
+InventoryComp() = InventoryComp(Items())
 
 @component struct PlayerLeftControlComp
 end
@@ -58,6 +65,10 @@ end
 @component struct LifetimeComp
     max_age::Int
 end
+
+@component struct CollectibleComp
+end
+
 
 #-------------------------------------------------------------------------------
 # Systems
@@ -84,13 +95,22 @@ Overseer.requested_components(::PositionUpdate) = (SpatialComp,CollisionComp)
 function Overseer.update(::PositionUpdate, m::AbstractLedger)
 	spatial = m[SpatialComp]
 
-    #=
-    #TODO: Collision resolution
     collision = m[CollisionComp]
 
-    collidables = [(s=spatial[e], c=collision[e]) for e in @entities_in(spatial)]
-    sort!(collidables, by=obj->obj.c.mass)
-    =#
+    collidables = [(s=spatial[e], c=collision[e], e=e) for e in @entities_in(spatial && collision)]
+    sort!(collidables, by=obj->obj.c.mass, rev=true)
+
+    board = m.board
+    for obj in collidables
+        pos = obj.s.position
+        new_pos = obj.s.position + obj.s.velocity
+        if #==# new_pos[1] < 1 || size(board,1) < new_pos[1] ||
+                new_pos[2] < 1 || size(board,2) < new_pos[2] ||
+                (board[pos...] == ' ' && board[new_pos...] != ' ')
+            # Inelastic collision with walls / border
+            spatial[obj.e] = SpatialComp(pos, VI[0,0])
+        end
+    end
 
     for e in @entities_in(spatial)
         s = spatial[e]
@@ -180,7 +200,11 @@ function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
     killer_tag = m[EntityKillerComp]
     killer_positions = Set{Vec2I}()
     for e in @entities_in(spatial && killer_tag)
-        push!(killer_positions, spatial[e].position)
+        pos = spatial[e].position
+        push!(killer_positions, pos)
+        if 1 <= pos[1] <= m.board_size[1] && 1 <= pos[2] <= m.board_size[2]
+            m.board[pos...] = ' '
+        end
     end
     for e in @entities_in(spatial)
         if !(e in killer_tag) && (spatial[e].position in killer_positions)
@@ -215,25 +239,56 @@ function Overseer.update(::PlayerRightControlUpdate, m::AbstractLedger)
 
             # Rising Balloon
             Entity(m, SpatialComp(s.position, VI[0,1]),
-                   SpriteComp('💠', 1))
+                   SpriteComp('🎈', 1))
 
             # Ticking, random walking bomb. Lol
             clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗💣🕘💣🕙💣🕚")
             Entity(m, SpatialComp(s.position, VI[0,0]),
-                   # RandomVelocityControlComp(),
+                   #RandomVelocityControlComp(),
                    TimerComp(),
                    SpriteComp('💣', 1),
                    AnimatedSpriteComp(clocks),
-                   ExplosionComp(length(clocks), 1))
+                   ExplosionComp(length(clocks), 2))
 
             # Fruit random walkers :-D
             Entity(m, SpatialComp(s.position, VI[0,0]),
                    RandomVelocityControlComp(),
-                   SpriteComp(rand(collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")), 1))
+                   SpriteComp(rand(collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")), 1),
+                   TimerComp(),
+                   LifetimeComp(rand(1:10)+rand(1:10)))
         end
 	end
 end
 
+# Inventory management
+
+struct InventoryCollectionUpdate <: System end
+
+Overseer.requested_components(::InventoryCollectionUpdate) = (InventoryComp,SpatialComp,SpriteComp,CollectibleComp)
+
+function Overseer.update(::InventoryCollectionUpdate, m::AbstractLedger)
+    inventory = m[InventoryComp]
+    spatial = m[SpatialComp]
+    sprite = m[SpriteComp]
+    collectible = m[CollectibleComp]
+
+    collectors = [(pos=spatial[e].position, items=inventory[e].items)
+                  for e in @entities_in(inventory && spatial)]
+
+    @info "Collectors" collectors
+
+    for e in @entities_in(spatial && collectible && sprite)
+        pos = spatial[e].position
+        for collector in collectors
+            if pos == collector.pos
+                push!(collector.items, sprite[e].icon)
+                schedule_delete!(m, e)
+                break
+            end
+        end
+    end
+    delete_scheduled!(m)
+end
 
 # Graphics & Rendering
 
@@ -256,7 +311,8 @@ end
 
 struct TerminalRenderer <: System end
 
-Overseer.requested_components(::TerminalRenderer) = (SpatialComp,SpriteComp)
+Overseer.requested_components(::TerminalRenderer) = (SpatialComp,SpriteComp,
+                                                     InventoryComp,PlayerInfoComp)
 
 function Overseer.update(::TerminalRenderer, m::AbstractLedger)
 	spatial_comp = m[SpatialComp]
@@ -264,14 +320,36 @@ function Overseer.update(::TerminalRenderer, m::AbstractLedger)
     drawables = [(spatial=spatial_comp[e], sprite=sprite_comp[e], id=e.id)
                  for e in @entities_in(spatial_comp && sprite_comp)]
     sort!(drawables, by=obj->(obj.sprite.draw_priority,obj.id))
-    board = fill(' ', m.board_size...)
+    board = copy(m.board)
+    # Fill in board
     for obj in drawables
         pos = obj.spatial.position
         if 1 <= pos[1] <= m.board_size[1] && 1 <= pos[2] <= m.board_size[2]
             board[pos...] = obj.sprite.icon
         end
     end
-    printboard(m, board)
+    # Collect and render inventories
+    inventory = m[InventoryComp]
+    player_info = m[PlayerInfoComp]
+    left_sidebar = fill("", size(m.board,2))
+    right_sidebar = fill("", size(m.board,2))
+    for e in @entities_in(inventory && player_info)
+        if player_info[e].number == 1
+            sidebar = right_sidebar
+        elseif player_info[e].number == 2
+            sidebar = left_sidebar
+        else
+            continue
+        end
+        for (j,(item,count)) in enumerate(inventory[e].items)
+            if j > length(sidebar)
+                break
+            end
+            sidebar[end+1-j] = "$(item)$(lpad(count,3))"
+        end
+    end
+    # Render
+    printboard(m, board, left_sidebar, right_sidebar)
 end
 
 #-------------------------------------------------------------------------------
@@ -281,26 +359,45 @@ mutable struct Gameoji <: AbstractLedger
     term
     input_key
     board_size::Vec2I
+    board::Matrix{Char}
     ledger::Ledger
 end
 
 function Gameoji(term)
     h,w = displaysize(stdout)
-    board_size = VI[w÷2,h]
+    board_size = VI[(w-2*sidebar_width)÷2, h]
+    board = generate_maze(tuple(board_size...))
     ledger = Ledger(
         Stage(:control, [RandomVelocityUpdate(), PlayerRightControlUpdate()]),
         Stage(:dynamics, [PositionUpdate()]),
-        Stage(:lifetime, [LifetimeUpdate(), TimedExplosion(), EntityKillUpdate()]),
+        Stage(:lifetime, [InventoryCollectionUpdate(), LifetimeUpdate(),
+                          TimedExplosion(), EntityKillUpdate()]),
         Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
         Stage(:dynamics_post, [TimerUpdate()]),
     )
-    Gameoji(term, '\0', board_size, ledger)
+    Gameoji(term, '\0', board_size, board, ledger)
 end
 
-printboard(game::Gameoji, board) = printboard(game.term, board)
+function Base.show(io::IO, game::Gameoji)
+    error("Nope")
+    print(io, "Gameoji on $(game.board_size[1])×$(game.board_size[2]) board with $(length(game.ledger.entities) - length(game.ledger.free_entities)) current entities")
+end
+
+printboard(game::Gameoji, args...) = printboard(game.term, args...)
 
 Overseer.stages(game::Gameoji) = stages(game.ledger)
 Overseer.ledger(game::Gameoji) = game.ledger
+
+function seed_rand!(ledger::AbstractLedger, board, components::ComponentData...)
+    for j=1:100
+        pos = VI[rand(1:size(board,1)), rand(1:size(board,2))]
+        if board[pos...] == ' '
+            Entity(ledger, SpatialComp(pos, VI[0,0]),
+                   components...)
+            break
+        end
+    end
+end
 
 function init_game(term)
     game = Gameoji(term)
@@ -308,18 +405,37 @@ function init_game(term)
     Entity(game.ledger,
         SpatialComp(VI[10,10], VI[0,0]),
         RandomVelocityControlComp(),
-        SpriteComp('🐈', 10)
+        SpriteComp('🐈', 10),
+        CollisionComp(1),
     )
     Entity(game.ledger,
         SpatialComp(VI[10,10], VI[0,0]),
         PlayerRightControlComp(),
-        SpriteComp('👦', 1000)
+        InventoryComp(),
+        PlayerInfoComp(1),
+        SpriteComp('👦', 1000),
+        CollisionComp(1),
     )
+
+    for _=1:100
+        seed_rand!(game.ledger, game.board,
+                   CollectibleComp(),
+                   SpriteComp('💠', 2))
+    end
+
+    for _=1:100
+        seed_rand!(game.ledger, game.board,
+                   CollectibleComp(),
+                   SpriteComp('🍍', 2),
+                   TimerComp(),
+                   ExplosionComp(rand(1:100)+rand(1:100), 1))
+    end
 
     game
 end
 
 include("terminal.jl")
+include("maze_levels.jl")
 
 function main()
     term = TerminalMenus.terminal

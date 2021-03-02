@@ -1,10 +1,14 @@
+using JLD2
+using LinearAlgebra
+using Distributions
+
 # Simplistic maze like level generator
 
 rand_turn(d) = rand((rot90p(d), rot90m(d)))
 
 in_board(board, pos) = 1 <= pos[1] <= size(board,1) && 1 <= pos[2] <= size(board,2)
 
-rot90p(d) = Vec(-d[2], d[1])
+rot90p(d) = VI[-d[2], d[1]]
 rot90m(d) = -rot90p(d)
 
 """
@@ -60,9 +64,9 @@ end
 function run_walkers(board, choose_direction)
     while sum(==(' '), board) > 0.6*length(board)
         # Choose initial position, not surrounded by bricks
-        pos = Vec(0,0)
+        pos = VI[0,0]
         while true
-            pos = Vec(rand(2:size(board,1)-1), rand(2:size(board,2)-1))
+            pos = VI[rand(2:size(board,1)-1), rand(2:size(board,2)-1)]
             if  board[pos...]             != brick  &&
                 board[(pos .+ (-1,0))...] != brick  &&
                 board[(pos .+ ( 1,0))...] != brick  &&
@@ -71,7 +75,7 @@ function run_walkers(board, choose_direction)
                 break
             end
         end
-        d = rand((Vec(1,0), Vec(-1,0), Vec(0,1), Vec(0,-1)))
+        d = rand((VI[1,0], VI[-1,0], VI[0,1], VI[0,-1]))
         c = brick
         for i=1:100
             env = observe_env(board, pos, d, Char(0))
