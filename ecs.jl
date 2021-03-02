@@ -65,6 +65,13 @@ end
 @component struct EntityKillerComp
 end
 
+@component struct ExplosionDamageComp
+end
+
+@component struct ExplosiveReactionComp
+    type::Symbol # :none :die :explode :disappear (default)
+end
+
 @component struct LifetimeComp
     max_age::Int
 end
@@ -199,20 +206,17 @@ end
 
 struct TimedExplosion <: System end
 
-Overseer.requested_components(::TimedExplosion) = (SpatialComp,TimerComp,ExplosionComp,EntityKillerComp)
+Overseer.requested_components(::TimedExplosion) = (SpatialComp,TimerComp,ExplosionComp,ExplosionDamageComp)
 
 function Overseer.update(::TimedExplosion, m::AbstractLedger)
 	spatial = m[SpatialComp]
 	timer = m[TimerComp]
     explosion = m[ExplosionComp]
-    killer_comp = m[EntityKillerComp]
+    damage = m[ExplosionDamageComp]
     for e in @entities_in(spatial && timer && explosion)
         t = timer[e].time
         ex = explosion[e]
         r = t - ex.deadline
-        if r == 0
-            killer_comp[e] = EntityKillerComp()
-        end
         if r >= 0
             position = spatial[e].position
             for i=-r:r, j=-r:r
@@ -221,7 +225,7 @@ function Overseer.update(::TimedExplosion, m::AbstractLedger)
                            SpriteComp('💥', 50),
                            TimerComp(),
                            LifetimeComp(1),
-                           EntityKillerComp(),
+                           ExplosionDamageComp(),
                           )
                 end
             end
@@ -274,6 +278,55 @@ function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
     delete_scheduled!(m)
 end
 
+# Spatially deleting entities
+struct ExplosionDamageUpdate <: System end
+
+Overseer.requested_components(::ExplosionDamageUpdate) = (SpatialComp,ExplosionDamageComp,ExplosiveReactionComp)
+
+function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
+	spatial = m[SpatialComp]
+    exp_damage = m[ExplosionDamageComp]
+    explosion_positions = Set{Vec2I}()
+    for e in @entities_in(spatial && exp_damage)
+        pos = spatial[e].position
+        push!(explosion_positions, pos)
+        if 1 <= pos[1] <= m.board_size[1] && 1 <= pos[2] <= m.board_size[2]
+            m.board[pos...] = ' '
+        end
+    end
+    reaction = m[ExplosiveReactionComp]
+    sprite = m[SpriteComp]
+    for e in @entities_in(spatial && !exp_damage)
+        pos = spatial[e].position
+        if pos in explosion_positions
+            r = e in reaction ? reaction[e].type : :disappear
+            # :none :die :explode :disappear (default)
+            if r === :disappear
+                schedule_delete!(m, e)
+            elseif r === :die
+                # TODO: Set movement disabled property?
+                sprite[e] = SpriteComp('💀', sprite[e].draw_priority)
+                schedule_delete!(m, e)
+            elseif r === :explode
+                for i=-1:1, j=-1:1
+                    Entity(m, SpatialComp(pos + VI[i,j], VI[0,0]),
+                           SpriteComp('💥', 50),
+                           TimerComp(),
+                           LifetimeComp(1),
+                           ExplosionDamageComp(),
+                          )
+                end
+                schedule_delete!(m, e)
+            elseif r === :none
+                # pass
+            else
+                error("Unrecognized explosion reaction property $r")
+            end
+        end
+	end
+    delete_scheduled!(m)
+end
+
 
 # Player Control
 
@@ -308,7 +361,9 @@ function Overseer.update(::PlayerRightControlUpdate, m::AbstractLedger)
                    TimerComp(),
                    SpriteComp('💣', 1),
                    AnimatedSpriteComp(clocks),
-                   ExplosionComp(length(clocks), 2))
+                   ExplosionComp(length(clocks), 2),
+                   ExplosiveReactionComp(:none)
+                   )
 
             # Fruit random walkers :-D
             Entity(m, SpatialComp(s.position, VI[0,0]),
@@ -429,7 +484,7 @@ function Gameoji(term)
         Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerRightControlUpdate()]),
         Stage(:dynamics, [PositionUpdate()]),
         Stage(:lifetime, [InventoryCollectionUpdate(), LifetimeUpdate(),
-                          TimedExplosion(), EntityKillUpdate()]),
+                          TimedExplosion(), ExplosionDamageUpdate(), EntityKillUpdate()]),
         Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
         Stage(:dynamics_post, [TimerUpdate()]),
     )
@@ -527,6 +582,14 @@ function init_game(term)
                    SpriteComp('🍍', 2),
                    TimerComp(),
                    ExplosionComp(rand(1:100)+rand(1:100), 1))
+    end
+
+    # Bombs which may be collected, but explode if there's an explosion
+    for _=1:prod(game.board_size)
+        seed_rand!(game.ledger, game.board,
+                   SpriteComp('💣', 1),
+                   ExplosiveReactionComp(:explode),
+                   CollectibleComp())
     end
 
     game
