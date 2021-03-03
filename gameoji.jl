@@ -377,8 +377,9 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
                            ExplosionComp(length(clocks), 2),
                            ExplosiveReactionComp(:none)
                           )
-                # 2 % chance of a randomly walking ticking bomb :-D
-                if rand() < 0.2
+                # "Crazy bomb"
+                # 5 % chance of a randomly walking ticking bomb :-D
+                if rand() < 0.05
                     m[e] = RandomVelocityControlComp()
                 end
             elseif value == '💠' && has_item
@@ -575,7 +576,7 @@ function init_game(term)
     Entity(game.ledger,
         SpatialComp(board_centre, VI[0,0]),
         PlayerControlComp(left_hand_keymap),
-        InventoryComp(Items('💣'=>1, '💠'=>1)),
+        InventoryComp(Items('💣'=>1)),
         PlayerInfoComp('👧', 2),
         SpriteComp('👧', 1000),
         CollisionComp(1),
