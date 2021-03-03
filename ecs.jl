@@ -50,10 +50,8 @@ end
 
 InventoryComp() = InventoryComp(Items())
 
-@component struct PlayerLeftControlComp
-end
-
-@component struct PlayerRightControlComp
+@component struct PlayerControlComp
+    keymap::Dict{Any,Tuple{Symbol,Any}}
 end
 
 @component struct RandomVelocityControlComp
@@ -329,40 +327,36 @@ end
 
 # Player Control
 
-struct PlayerRightControlUpdate <: System end
+struct PlayerControlUpdate <: System end
 
-Overseer.requested_components(::PlayerRightControlUpdate) = (SpatialComp, PlayerRightControlComp, SpriteComp)
+Overseer.requested_components(::PlayerControlUpdate) = (SpatialComp, PlayerControlComp, SpriteComp)
 
-function Overseer.update(::PlayerRightControlUpdate, m::AbstractLedger)
+function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
 	spatial_comp = m[SpatialComp]
-	control_comp = m[PlayerRightControlComp]
+	controls = m[PlayerControlComp]
     sprite_comp = m[SpriteComp]
-    key = m.input_key
-    velocity = key == ARROW_UP    ? VI[0, 1] :
-               key == ARROW_DOWN  ? VI[0,-1] :
-               key == ARROW_LEFT  ? VI[-1,0] :
-               key == ARROW_RIGHT ? VI[1, 0] :
-               VI[0,0]
-    use_item = key == ' '
-    for e in @entities_in(spatial_comp && control_comp && sprite_comp)
+    for e in @entities_in(spatial_comp && controls && sprite_comp)
         if sprite_comp[e].icon == '💀'
             # Player is dead.
             # TODO: Might want to use something other than the icon for this
             # state machine!
             continue
         end
-        s = spatial_comp[e]
-        spatial_comp[e] = SpatialComp(s.position, velocity)
-        if use_item
+        position = spatial_comp[e].position
+        velocity = VI[0,0]
+        action,value = get(controls[e].keymap, m.input_key, (:none,nothing))
+        if action === :move
+            velocity = value
+        elseif action == :use_item
             # Some tests of various entity combinations
 
             # Rising Balloon
-            Entity(m, SpatialComp(s.position, VI[0,1]),
+            Entity(m, SpatialComp(position, VI[0,1]),
                    SpriteComp('🎈', 1))
 
             # Ticking, random walking bomb. Lol
             clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗💣🕘💣🕙💣🕚")
-            Entity(m, SpatialComp(s.position, VI[0,0]),
+            Entity(m, SpatialComp(position, VI[0,0]),
                    #RandomVelocityControlComp(),
                    TimerComp(),
                    SpriteComp('💣', 1),
@@ -371,6 +365,7 @@ function Overseer.update(::PlayerRightControlUpdate, m::AbstractLedger)
                    ExplosiveReactionComp(:none)
                    )
         end
+        spatial_comp[e] = SpatialComp(position, velocity)
 	end
 end
 
@@ -481,7 +476,7 @@ function Gameoji(term)
     board_size = VI[(w-2*sidebar_width)÷2, h]
     board = fill(' ', tuple(board_size...))
     ledger = Ledger(
-        Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerRightControlUpdate()]),
+        Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerControlUpdate()]),
         Stage(:dynamics, [PositionUpdate()]),
         Stage(:lifetime, [InventoryCollectionUpdate(), LifetimeUpdate(),
                           TimedExplosion(), ExplosionDamageUpdate(), EntityKillUpdate()]),
@@ -519,12 +514,40 @@ function init_game(term)
 
     game.board = generate_maze(tuple(game.board_size...))
 
+    # Set up players
+    # Right hand keyboard controls
+    right_hand_keymap =
+         Dict(ARROW_UP   =>(:move, VI[0, 1]),
+              ARROW_DOWN =>(:move, VI[0,-1]),
+              ARROW_LEFT =>(:move, VI[-1,0]),
+              ARROW_RIGHT=>(:move, VI[1, 0]),
+              '0'        =>(:use_item, nothing))
+
+    board_centre = game.board_size .÷ 2
+
     Entity(game.ledger,
-        SpatialComp(VI[10,10], VI[0,0]),
-        PlayerRightControlComp(),
+        SpatialComp(board_centre, VI[0,0]),
+        PlayerControlComp(right_hand_keymap),
         InventoryComp(),
         PlayerInfoComp(1),
         SpriteComp('👦', 1000),
+        CollisionComp(1),
+        ExplosiveReactionComp(:die),
+    )
+
+    left_hand_keymap =
+         Dict('w'=>(:move, VI[0, 1]),
+              's'=>(:move, VI[0,-1]),
+              'a'=>(:move, VI[-1,0]),
+              'd'=>(:move, VI[1, 0]),
+              '1'=>(:use_item, nothing))
+
+    Entity(game.ledger,
+        SpatialComp(board_centre, VI[0,0]),
+        PlayerControlComp(left_hand_keymap),
+        InventoryComp(),
+        PlayerInfoComp(1),
+        SpriteComp('👧', 1000),
         CollisionComp(1),
         ExplosiveReactionComp(:die),
     )
