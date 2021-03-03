@@ -1,453 +1,691 @@
 #!/bin/bash
 #=
-exec julia --project=. -e 'include(popfirst!(ARGS))' \
+exec julia --project=. -e 'include(popfirst!(ARGS)); main()' \
     "${BASH_SOURCE[0]}" "$@"
 =#
 
-module Gameoji
-
+using Overseer
 using StaticArrays
-using Crayons
-#using Revise
+using REPL
 using Logging
-using LinearAlgebra
-using Distributions
-using JLD2
 
-include("types.jl")
-include("terminal.jl")
-include("maze_levels.jl")
-
-# Board redesign:
-#
-# Multiple layers:
-# * Explosion
-# * Height (players can move +0.5 in height)
-#
-# * Sprite list, contains all "objects"
-#
-# Update pass:
-#
-# board = Board(
-#     height = zeros(boardsize),
-#     explosion = falses(boardsize),
-#     ...
-# )
-#
-# for object in objects
-#     update_board!(board, object)
-#     evolve_dynamics(board.explosion)
-# end
-
-
-function clampmove(board, p)
-    (clamp(p[1], 1, size(board,1)),
-     clamp(p[2], 1, size(board,2)))
-end
+const Vec2I = SVector{2,Int}
+const VI = SA{Int}
 
 include("inventory.jl")
 
 #-------------------------------------------------------------------------------
-# Sprites
-abstract type Sprite end
-abstract type Player <: Sprite end
+# Components for game entities
 
-"""
-    Propose an action for the sprite.
-
-Return the proposed next position for the sprite (game rules will be applied
-to this position).
-"""
-propose_action!(::Sprite, board, sprites, p0, inchar) = p0
-
-"""
-    Move sprite to `pos`
-"""
-transition!(sprite::Sprite, board, pos) = sprite
-
-"""
-    Get current picture for a sprite
-"""
-icon(sprite::Sprite) = sprite.icon
-
-
-mutable struct Girl <: Player
-    base_icon::Char
-    icon::Char
-    pos::Vec
-    items::Items
-end
-function Girl(pos)
-    icon = '👧'
-    Girl(icon, icon, pos, Items())
-end
-
-
-mutable struct Boy <: Player
-    base_icon::Char
-    icon::Char
-    pos::Vec
-    items::Items
-end
-function Boy(pos)
-    icon = '👦'
-    Boy(icon, icon, pos, Items())
-end
-
-
-mutable struct Dog <: Sprite
-    base_icon::Char
-    icon::Char
-    pos::Vec
-end
-function Dog(pos)
-    icon = '🐕'
-    Dog(icon, icon, pos)
-end
-
-
-const ticking_clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
-mutable struct ExplodingClock <: Sprite
-    pos::Vec
+@component struct TimerComp
     time::Int
 end
-ExplodingClock(pos) = ExplodingClock(pos, 0)
-icon(c::ExplodingClock) = ticking_clocks[mod1(c.time, length(ticking_clocks))]
+TimerComp() = TimerComp(0)
 
-
-mutable struct Boom <: Sprite
-    pos::Vec
-    time::Int
-end
-Boom(pos) = Boom(pos, 0)
-icon(::Boom) = '💥'
-
-function explosion(pos, radius)
-    [Boom(pos .+ (i,j)) for i = -radius:radius, j=-radius:radius]
+@component struct SpatialComp
+    position::Vec2I
+    velocity::Vec2I
 end
 
-mutable struct Balloon <: Sprite
-    pos::Vec
-end
-icon(::Balloon) = '🎈'
+SpatialComp(position::Vec2I) = SpatialComp(position, VI[0,0])
 
-
-struct ExplodingPineapple <: Sprite
-    pos::Vec
+@component struct CollisionComp
+    mass::Int
 end
-# Fixme... why doesn't skull & crossbones or coffin work?
-icon(::ExplodingPineapple) = '🍍'
+
+@component struct SpriteComp
+    icon::Char
+    draw_priority::Int
+end
+
+@component struct AnimatedSpriteComp
+    icons::Vector{Char}
+end
+
+@component struct ExplosionComp
+    deadline::Int
+    radius::Int
+end
+
+@component struct InventoryComp
+    items::Items
+end
+InventoryComp() = InventoryComp(Items())
+
+@component struct PlayerInfoComp
+    base_icon::Char
+    number::Int
+end
+
+@component struct PlayerControlComp
+    keymap::Dict{Any,Tuple{Symbol,Any}}
+end
+
+@component struct RandomVelocityControlComp
+end
+
+@component struct BoidControlComp
+end
+
+@component struct EntityKillerComp
+end
+
+@component struct ExplosionDamageComp
+end
+
+@component struct ExplosiveReactionComp
+    type::Symbol # :none :die :explode :disappear (default)
+end
+
+@component struct LifetimeComp
+    max_age::Int
+end
+
+@component struct CollectibleComp
+end
+
 
 #-------------------------------------------------------------------------------
-# Sprite behaviour
+# Systems
 
-function keymap(::Girl, inchar)
-    keys = Dict('w' => :up,
-                's' => :down,
-                'a' => :left,
-                'd' => :right,
-                '1' => :use_bomb,
-               )
-    get(keys, inchar, :none)
+# Timer updates
+
+struct TimerUpdate <: System end
+
+Overseer.requested_components(::TimerUpdate) = (TimerComp,)
+
+function Overseer.update(::TimerUpdate, m::AbstractLedger)
+	timer = m[TimerComp]
+    for e in @entities_in(timer)
+        timer[e] = TimerComp(timer[e].time + 1)
+	end
 end
 
-function keymap(::Boy, inchar)
-    keys = Dict(ARROW_UP    => :up,
-                ARROW_DOWN  => :down,
-                ARROW_LEFT  => :left,
-                ARROW_RIGHT => :right,
-                '0'         => :use_bomb,
-               )
-    get(keys, inchar, :none)
-end
+# Position update
 
-function propose_action!(player::Player, board, sprites, p0, inchar)
-    if icon(player) == '💀'
-        return p0
+struct PositionUpdate <: System end
+
+Overseer.requested_components(::PositionUpdate) = (SpatialComp,CollisionComp)
+
+function Overseer.update(::PositionUpdate, m::AbstractLedger)
+	spatial = m[SpatialComp]
+
+    collision = m[CollisionComp]
+
+    collidables = [(s=spatial[e], c=collision[e], e=e) for e in @entities_in(spatial && collision)]
+    sort!(collidables, by=obj->obj.c.mass, rev=true)
+
+    board = m.board
+    for obj in collidables
+        pos = obj.s.position
+        new_pos = obj.s.position + obj.s.velocity
+        if #==# new_pos[1] < 1 || size(board,1) < new_pos[1] ||
+                new_pos[2] < 1 || size(board,2) < new_pos[2] ||
+                (board[pos...] == ' ' && board[new_pos...] != ' ')
+            # Inelastic collision with walls / border
+            spatial[obj.e] = SpatialComp(pos, VI[0,0])
+        end
     end
-    action = keymap(player, inchar)
-    p = p0
-    if action == :use_bomb
-        if icon(player) != '🤮'
-            # FIXME it's weird to push clocks onto the sprites list here
-            x = pop!(player.items, '💣')
-            if !isnothing(x)
-                push!(sprites, ExplodingClock(player.pos))
+
+    for e in @entities_in(spatial)
+        s = spatial[e]
+        spatial[e] = SpatialComp(s.position + s.velocity, s.velocity)
+    end
+end
+
+# Random Movement of NPCs
+
+struct RandomVelocityUpdate <: System end
+
+Overseer.requested_components(::RandomVelocityUpdate) = (SpatialComp,RandomVelocityControlComp)
+
+function Overseer.update(::RandomVelocityUpdate, m::AbstractLedger)
+	spatial = m[SpatialComp]
+    control = m[RandomVelocityControlComp]
+    velocities = (VI[1,0], VI[0,1], VI[-1,0], VI[0,-1])
+    for e in @entities_in(spatial && control)
+        s = spatial[e]
+        vel = rand(velocities)
+        spatial[e] = SpatialComp(s.position, vel)
+	end
+end
+
+# Boid control of NPCs
+
+struct BoidVelocityUpdate <: System end
+
+Overseer.requested_components(::BoidVelocityUpdate) = (SpatialComp,BoidControlComp)
+
+function Overseer.update(::BoidVelocityUpdate, m::AbstractLedger)
+	spatial = m[SpatialComp]
+    control = m[BoidControlComp]
+
+    boids = [(e,spatial[e]) for e in @entities_in(spatial && control)]
+    length(boids) > 1 || return
+
+    for e in @entities_in(spatial && control)
+        pos = spatial[e].position
+
+        # Local mean in position and velocity
+        mean_pos = SA_F64[0,0]
+        mean_vel = SA_F64[0,0]
+        sep_vel = SA_F64[0,0]
+        tot_weight = 0.0
+        sep_weight = 0.0
+        # O(N²) iteration
+        for (e2,s) in boids
+            d = pos - s.position
+            d2 = d⋅d
+            w = exp(-d2/4^2)
+            mean_pos += w*s.position
+            mean_vel += w*s.velocity
+            tot_weight += w
+            if e != e2 && d2 < 10
+                if d == 0
+                    θ = 2*π*rand()
+                    d = SA[cos(θ), sin(θ)]
+                end
+                sw = 1/(d2+0.01)
+                sep_weight += sw
+                sep_vel += sw*d
             end
         end
-    elseif action == :up
-        p += Vec(0, 1)
-    elseif action == :down
-        p += Vec(0, -1)
-    elseif action == :left
-        p += Vec(-1, 0)
-    elseif action == :right
-        p += Vec(1, 0)
-    end
-    return p
-end
-
-function transition!(girl::Girl, board, pos)
-    c = board[pos...]
-    if c == '💥'
-        girl.icon = '💀'
-        return girl
-    end
-    girl.pos = pos
-    if c == '🧁'
-        board[pos...] = ' '
-        return [girl, Balloon(pos)]
-    elseif c in ('💣',fruits...)
-        push!(girl.items, c)
-        board[pos...] = ' '
-    elseif c == '🍕'
-        board[pos...] = '💩'
-    elseif c == '💩'
-        board[pos...] = ' '
-        girl.icon = '🤮'
-    end
-    if girl.icon == '🤮' && c == '💧'
-        girl.icon = girl.base_icon
-    end
-    return girl
-end
-
-function transition!(boy::Boy, board, pos)
-    c = board[pos...]
-    if c == '💥'
-        boy.icon = '💀'
-        return boy
-    end
-    boy.pos = pos
-    if c == '🍕'
-        board[pos...] = ' '
-        return [boy, Balloon(pos)]
-    elseif c in ('💣',fruits...)
-        push!(boy.items, c)
-        board[pos...] = ' '
-    end
-    return boy
-end
-
-function propose_action!(dog::Dog, board, sprites, p0, inchar)
-    # Random step move
-    d = rand(Vec[(1,0), (-1,0), (0,1), (0,-1)])
-    return p0 .+ d
-end
-
-function transition!(dog::Dog, board, pos)
-    c = board[pos...]
-    if c == '💩'
-        board[pos...] = ' '
-    elseif c == '🎈'
-        board[pos...] = ' '
-    elseif c == '🧁'
-        board[pos...] = '🎈'
-    elseif c == '🍕'
-        board[pos...] = '💩'
-    end
-    dog.pos = pos
-    return dog
-end
-
-function propose_action!(b::Boom, board, sprites, p0, inchar)
-    return p0
-end
-
-function transition!(b::Boom, board, pos)
-    if b.time == 0
-        board[b.pos...] = '💥'
-    elseif b.time == 1
-        board[b.pos...] = ' '
-        return nothing
-    end
-    b.time += 1
-    return b
-end
-
-function transition!(clock::ExplodingClock, board, pos)
-    clock.time += 1
-    if clock.time > length(ticking_clocks)
-        return explosion(pos, 1)
-    end
-    return clock
+        if tot_weight > 0
+            mean_pos = mean_pos ./ tot_weight
+            mean_vel = mean_vel ./ tot_weight
+        end
+        if sep_weight > 0
+            sep_vel  = sep_vel ./ sep_weight
+        end
+        θ = 2*π*rand()
+        rand_vel = SA[cos(θ), sin(θ)]
+        cohesion_vel = mean_pos - pos
+        norm(cohesion_vel) != 0 && (cohesion_vel = normalize(cohesion_vel))
+        vel = 0.2*cohesion_vel + 0.3*sep_vel + mean_vel + 0.5*rand_vel
+        spatial[e] = SpatialComp(pos, clamp.(round.(Int, vel), -1, 1))
+	end
 end
 
 
-function propose_action!(balloon::Balloon, board, sprites, p0, inchar)
-    # Balloons float to top
-    p0 .+ Vec(0,1)
+# Explosions
+
+struct TimedExplosion <: System end
+
+Overseer.requested_components(::TimedExplosion) = (SpatialComp,TimerComp,ExplosionComp,ExplosionDamageComp)
+
+function Overseer.update(::TimedExplosion, m::AbstractLedger)
+	spatial = m[SpatialComp]
+	timer = m[TimerComp]
+    explosion = m[ExplosionComp]
+    damage = m[ExplosionDamageComp]
+    for e in @entities_in(spatial && timer && explosion)
+        t = timer[e].time
+        ex = explosion[e]
+        r = t - ex.deadline
+        if r >= 0
+            position = spatial[e].position
+            for i=-r:r, j=-r:r
+                if abs(i) == r || abs(j) == r
+                    Entity(m, SpatialComp(position + VI[i,j], VI[0,0]),
+                           SpriteComp('💥', 50),
+                           TimerComp(),
+                           LifetimeComp(1),
+                           ExplosionDamageComp(),
+                          )
+                end
+            end
+            if r >= ex.radius
+                schedule_delete!(m, e)
+            end
+        end
+	end
+    delete_scheduled!(m)
 end
 
-function transition!(balloon::Balloon, board, pos)
-    if pos[1] == size(board,2)
-        return Boom(pos)
-    end
-    balloon.pos = pos
-    return balloon
+# Sprites with finite lifetime
+struct LifetimeUpdate <: System end
+
+Overseer.requested_components(::LifetimeUpdate) = (TimerComp,LifetimeComp)
+
+function Overseer.update(::LifetimeUpdate, m::AbstractLedger)
+	timer = m[TimerComp]
+    lifetime = m[LifetimeComp]
+    for e in @entities_in(timer && lifetime)
+        if timer[e].time > lifetime[e].max_age
+            schedule_delete!(m, e)
+        end
+	end
+    delete_scheduled!(m)
 end
 
 
-function transition!(ep::ExplodingPineapple, board, pos)
-    if rand() < 0.01
-        return explosion(pos, 1)
+# Spatially deleting entities
+struct EntityKillUpdate <: System end
+
+Overseer.requested_components(::EntityKillUpdate) = (SpatialComp,EntityKillerComp)
+
+function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
+	spatial = m[SpatialComp]
+    killer_tag = m[EntityKillerComp]
+    killer_positions = Set{Vec2I}()
+    for e in @entities_in(spatial && killer_tag)
+        pos = spatial[e].position
+        push!(killer_positions, pos)
+        if 1 <= pos[1] <= m.board_size[1] && 1 <= pos[2] <= m.board_size[2]
+            m.board[pos...] = ' '
+        end
     end
-    return ep
+    for e in @entities_in(spatial)
+        if !(e in killer_tag) && (spatial[e].position in killer_positions)
+            schedule_delete!(m, e)
+        end
+	end
+    delete_scheduled!(m)
+end
+
+# Spatially deleting entities
+struct ExplosionDamageUpdate <: System end
+
+Overseer.requested_components(::ExplosionDamageUpdate) = (SpatialComp,ExplosionDamageComp,ExplosiveReactionComp)
+
+function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
+	spatial = m[SpatialComp]
+    exp_damage = m[ExplosionDamageComp]
+    explosion_positions = Set{Vec2I}()
+    for e in @entities_in(spatial && exp_damage)
+        pos = spatial[e].position
+        push!(explosion_positions, pos)
+        if 1 <= pos[1] <= m.board_size[1] && 1 <= pos[2] <= m.board_size[2]
+            m.board[pos...] = ' '
+        end
+    end
+    reaction = m[ExplosiveReactionComp]
+    sprite = m[SpriteComp]
+    for e in @entities_in(spatial && !exp_damage)
+        pos = spatial[e].position
+        if pos in explosion_positions
+            r = e in reaction ? reaction[e].type : :disappear
+            # :none :die :explode :disappear (default)
+            if r === :disappear
+                schedule_delete!(m, e)
+            elseif r === :die
+                # TODO: Set movement disabled property?
+                sprite[e] = SpriteComp('💀', sprite[e].draw_priority)
+            elseif r === :explode
+                for i=-1:1, j=-1:1
+                    Entity(m, SpatialComp(pos + VI[i,j], VI[0,0]),
+                           SpriteComp('💥', 50),
+                           TimerComp(),
+                           LifetimeComp(1),
+                           ExplosionDamageComp(),
+                          )
+                end
+                schedule_delete!(m, e)
+            elseif r === :none
+                # pass
+            else
+                error("Unrecognized explosion reaction property $r")
+            end
+        end
+	end
+    delete_scheduled!(m)
 end
 
 
-#-------------------------------------------------------------------------------
-# join(Char.(Int('🕐') .+ (0:11)))
-clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
-moons = collect("🌑🌒🌓🌔🌕🌖🌗🌘")
-fruits = collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")
-flowers = collect("💮🌼💐🌺🌹🌸🌷🌻🏵")
-plants = collect("🌲🌳🌱🌴🌵🌴🌳🌿🍀🍁🍂🍄")
-food = collect("🌽🌾")
-treasure = collect("💰💎")
-animals = collect("🐇🐝🐞🐤🐥🐦🐧🐩🐪🐫")
-water_animals = collect("🐬🐳🐙🐊🐋🐟🐠🐡")
-buildings = collect("🏰🏯🏪🏫🏬🏭🏥")
-monsters = collect("👻👺👹👽🧟")
+# Player Control
 
-function draw(board, sprites)
-    # Compose screen & print it
-    screen = copy(board)
-    # Draw sprites on top of background
-    for obj in sprites
-        screen[obj.pos...] = icon(obj)
+struct PlayerControlUpdate <: System end
+
+Overseer.requested_components(::PlayerControlUpdate) = (SpatialComp, PlayerControlComp, SpriteComp, InventoryComp, PlayerInfoComp)
+
+function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
+	spatial = m[SpatialComp]
+	controls = m[PlayerControlComp]
+    sprite = m[SpriteComp]
+    inventory = m[InventoryComp]
+    player_info = m[PlayerInfoComp]
+    for e in @entities_in(spatial && controls && sprite && inventory)
+        if sprite[e].icon == '💀'
+            # Player is dead.
+            # TODO: Might want to use something other than the icon for this
+            # state machine!
+            continue
+        end
+        position = spatial[e].position
+        velocity = VI[0,0]
+        action,value = get(controls[e].keymap, m.input_key, (:none,nothing))
+        if action === :move
+            velocity = value
+        elseif action == :use_item
+            # Some tests of various entity combinations
+
+            # Rising Balloon
+            #=
+            Entity(m, SpatialComp(position, VI[0,1]),
+                   SpriteComp('🎈', 1))
+            =#
+
+            has_item = !isnothing(pop!(inventory[e].items, value))
+
+            if value == '💣' && has_item
+                clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗💣🕘💣🕙💣🕚")
+                e = Entity(m,
+                           SpatialComp(position, VI[0,0]),
+                           TimerComp(),
+                           SpriteComp('💣', 20),
+                           AnimatedSpriteComp(clocks),
+                           ExplosionComp(length(clocks), 2),
+                           ExplosiveReactionComp(:none)
+                          )
+                # 2 % chance of a randomly walking ticking bomb :-D
+                if rand() < 0.2
+                    m[e] = RandomVelocityControlComp()
+                end
+            elseif value == '💠' && has_item
+                # Player healing other player.
+                # TODO: Move this out to be a more generic effect in its own system?
+                for other_e in @entities_in(spatial && player_info && sprite)
+                    if spatial[other_e].position == position
+                        sprite[other_e] = SpriteComp(player_info[other_e].base_icon,
+                                                     sprite[other_e].draw_priority)
+                    end
+                end
+                sprite = m[SpriteComp]
+            end
+        end
+        spatial[e] = SpatialComp(position, velocity)
+	end
+end
+
+# Inventory management
+
+struct InventoryCollectionUpdate <: System end
+
+Overseer.requested_components(::InventoryCollectionUpdate) = (InventoryComp,SpatialComp,SpriteComp,CollectibleComp)
+
+function Overseer.update(::InventoryCollectionUpdate, m::AbstractLedger)
+    inventory = m[InventoryComp]
+    spatial = m[SpatialComp]
+    sprite = m[SpriteComp]
+    collectible = m[CollectibleComp]
+
+    collectors = [(pos=spatial[e].position, items=inventory[e].items)
+                  for e in @entities_in(inventory && spatial)]
+
+    for e in @entities_in(spatial && collectible && sprite)
+        pos = spatial[e].position
+        for collector in collectors
+            if pos == collector.pos
+                push!(collector.items, sprite[e].icon)
+                schedule_delete!(m, e)
+                break
+            end
+        end
     end
-    players = [s for s in sprites if s isa Player]
-    # Overdraw players so they're always on top
-    for (i,person) in enumerate(players)
-        screen[person.pos...] = icon(person)
+    delete_scheduled!(m)
+end
+
+# Graphics & Rendering
+
+struct AnimatedSpriteUpdate <: System end
+
+Overseer.requested_components(::AnimatedSpriteUpdate) = (TimerComp,SpriteComp,AnimatedSpriteComp)
+
+function Overseer.update(::AnimatedSpriteUpdate, m::AbstractLedger)
+	sprite = m[SpriteComp]
+	anim_sprite = m[AnimatedSpriteComp]
+    timer = m[TimerComp]
+    for e in @entities_in(sprite && timer && anim_sprite)
+        t = timer[e].time
+        sprites = anim_sprite[e].icons
+        sprite[e] = SpriteComp(sprites[mod1(t,length(sprites))],
+                               sprite[e].draw_priority)
+	end
+end
+
+
+struct TerminalRenderer <: System end
+
+Overseer.requested_components(::TerminalRenderer) = (SpatialComp,SpriteComp,
+                                                     InventoryComp,PlayerInfoComp)
+
+function Overseer.update(::TerminalRenderer, m::AbstractLedger)
+	spatial_comp = m[SpatialComp]
+    sprite_comp = m[SpriteComp]
+    drawables = [(spatial=spatial_comp[e], sprite=sprite_comp[e], id=e.id)
+                 for e in @entities_in(spatial_comp && sprite_comp)]
+    sort!(drawables, by=obj->(obj.sprite.draw_priority,obj.id))
+    board = copy(m.board)
+    # Fill in board
+    for obj in drawables
+        pos = obj.spatial.position
+        if 1 <= pos[1] <= m.board_size[1] && 1 <= pos[2] <= m.board_size[2]
+            board[pos...] = obj.sprite.icon
+        end
     end
-    left_sidebar = fill("", size(board,2))
-    right_sidebar = fill("", size(board,2))
-    for (i,(person, sidebar)) in enumerate(zip(players, [left_sidebar, right_sidebar]))
-        for (j,(item,count)) in enumerate(person.items)
+    # Collect and render inventories
+    inventory = m[InventoryComp]
+    player_info = m[PlayerInfoComp]
+    left_sidebar = fill("", size(m.board,2))
+    right_sidebar = fill("", size(m.board,2))
+    for e in @entities_in(inventory && player_info)
+        if player_info[e].number == 1
+            sidebar = right_sidebar
+        elseif player_info[e].number == 2
+            sidebar = left_sidebar
+        else
+            continue
+        end
+        for (j,(item,count)) in enumerate(inventory[e].items)
             if j > length(sidebar)
                 break
             end
             sidebar[end+1-j] = "$(item)$(lpad(count,3))"
         end
     end
-    clear_screen(stdout)
-    print(stdout, sprint(printboard, screen, left_sidebar, right_sidebar))
+    # Render
+    print(m.term, "\e[1;1H") # Home position
+    print(m.term, sprint(printboard, board, left_sidebar, right_sidebar))
 end
 
-function main_loop!(board, sprites)
+#-------------------------------------------------------------------------------
+# Actual Game
+
+mutable struct Gameoji <: AbstractLedger
+    term
+    input_key
+    board_size::Vec2I
+    board::Matrix{Char}
+    ledger::Ledger
+end
+
+function Gameoji(term)
+    h,w = displaysize(stdout)
+    board_size = VI[(w-2*sidebar_width)÷2, h]
+    board = fill(' ', tuple(board_size...))
+    ledger = Ledger(
+        Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerControlUpdate()]),
+        Stage(:dynamics, [PositionUpdate()]),
+        Stage(:lifetime, [InventoryCollectionUpdate(), LifetimeUpdate(),
+                          TimedExplosion(), ExplosionDamageUpdate(), EntityKillUpdate()]),
+        Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
+        Stage(:dynamics_post, [TimerUpdate()]),
+    )
+    Gameoji(term, '\0', board_size, board, ledger)
+end
+
+function Base.show(io::IO, game::Gameoji)
+    print(io, "Gameoji on $(game.board_size[1])×$(game.board_size[2]) board with $(length(game.ledger.entities) - length(game.ledger.free_entities)) current entities")
+end
+
+Overseer.stages(game::Gameoji) = stages(game.ledger)
+Overseer.ledger(game::Gameoji) = game.ledger
+
+function rand_unoccupied_pos(board)
+    for j=1:100
+        pos = VI[rand(1:size(board,1)), rand(1:size(board,2))]
+        if board[pos...] == ' '
+            return pos
+        end
+    end
+    return nothing
+end
+
+function seed_rand!(ledger::AbstractLedger, board, components::ComponentData...)
+    pos = rand_unoccupied_pos(board)
+    !isnothing(pos) || return
+    Entity(ledger, SpatialComp(pos, VI[0,0]), components...)
+end
+
+function init_game(term)
+    game = Gameoji(term)
+
+    game.board = generate_maze(tuple(game.board_size...))
+
+    # Set up players
+    # Right hand keyboard controls
+    right_hand_keymap =
+         Dict(ARROW_UP   =>(:move, VI[0, 1]),
+              ARROW_DOWN =>(:move, VI[0,-1]),
+              ARROW_LEFT =>(:move, VI[-1,0]),
+              ARROW_RIGHT=>(:move, VI[1, 0]),
+              '0'        =>(:use_item, '💣'),
+              '9'        =>(:use_item, '💠'))
+
+    board_centre = game.board_size .÷ 2
+
+    Entity(game.ledger,
+        SpatialComp(board_centre, VI[0,0]),
+        PlayerControlComp(right_hand_keymap),
+        InventoryComp(Items('💣'=>1)),
+        PlayerInfoComp('👦', 1),
+        SpriteComp('👦', 1000),
+        CollisionComp(1),
+        ExplosiveReactionComp(:die),
+    )
+
+    left_hand_keymap =
+         Dict('w'=>(:move, VI[0, 1]),
+              's'=>(:move, VI[0,-1]),
+              'a'=>(:move, VI[-1,0]),
+              'd'=>(:move, VI[1, 0]),
+              '1'=>(:use_item, '💣'),
+              '2'=>(:use_item, '💠'))
+
+    Entity(game.ledger,
+        SpatialComp(board_centre, VI[0,0]),
+        PlayerControlComp(left_hand_keymap),
+        InventoryComp(Items('💣'=>1, '💠'=>1)),
+        PlayerInfoComp('👧', 2),
+        SpriteComp('👧', 1000),
+        CollisionComp(1),
+        ExplosiveReactionComp(:die),
+    )
+
+    #=
+    # Dog random walkers
+    for _=1:4
+        Entity(game.ledger,
+            SpatialComp(VI[10,10], VI[0,0]),
+            RandomVelocityControlComp(),
+            SpriteComp('🐕', 10),
+            InventoryComp(),
+            CollisionComp(1),
+        )
+    end
+    =#
+
+    # Flocking chickens
+    #boid_pos = rand_unoccupied_pos(game.board)
+    for _=1:30
+        seed_rand!(game.ledger, game.board,
+                   # SpatialComp(boid_pos, VI[rand(-1:1), rand(-1:1)]),
+                   #RandomVelocityControlComp(),
+                   BoidControlComp(),
+                   SpriteComp('🐔', 10),
+                   CollisionComp(1),
+                  )
+    end
+
+    # Collectibles
+    fruits = collect("🍉🍌🍏🍐🍑🍒🍓")
+    for _=1:100
+        seed_rand!(game.ledger, game.board,
+                   CollectibleComp(),
+                   SpriteComp(rand(fruits), 2))
+    end
+    treasure = collect("💰💎")
+    for _=1:10
+        seed_rand!(game.ledger, game.board,
+                   CollectibleComp(),
+                   SpriteComp(rand(treasure), 2))
+    end
+
+    treasure = collect("💰💎")
+    for _=1:2
+        seed_rand!(game.ledger, game.board,
+                   CollectibleComp(),
+                   SpriteComp('💠', 2))
+    end
+
+    monsters = collect("👺👹")
+    for _=1:5
+        seed_rand!(game.ledger, game.board,
+                   RandomVelocityControlComp(),
+                   EntityKillerComp(),
+                   CollisionComp(1),
+                   SpriteComp(rand(monsters), 2))
+    end
+
+    # Exploding pineapples
+    for _=1:5
+        seed_rand!(game.ledger, game.board,
+                   CollectibleComp(),
+                   SpriteComp('🍍', 2),
+                   TimerComp(),
+                   ExplosionComp(rand(1:100)+rand(1:100), 1))
+    end
+
+    # Bombs which may be collected, but explode if there's an explosion
+    for _=1:prod(game.board_size)
+        seed_rand!(game.ledger, game.board,
+                   SpriteComp('💣', 1),
+                   ExplosiveReactionComp(:explode),
+                   CollectibleComp())
+    end
+
+    game
+end
+
+include("terminal.jl")
+include("maze_levels.jl")
+
+function main()
     term = TerminalMenus.terminal
     open("log.txt", "w") do logio
         with_logger(ConsoleLogger(logio)) do
             rawmode(term) do
                 in_stream = term.in_stream
+                clear_screen(stdout)
+                # TODO: Try async read from stdin & timed game loop?
                 while true
-                    if bytesavailable(in_stream) == 0
-                        # Avoid repeated input lag by only drawing when no
-                        # bytes are available.
-                        draw(board, sprites)
-                    end
-                    key = read_key()
-                    if key == CTRL_C
-                        # Clear
-                        println("\e[1;1H\e[J")
-                        return
-                    end
-                    flush(logio) # Hack!
-                    new_positions = []
-                    for obj in sprites
-                        p0 = obj.pos
-                        p1 = propose_action!(obj, board, sprites, p0, key)
-                        p1 = clampmove(board, p1)
-                        # You can climb onto the bricks from the tree
-                        # HACK
-                        if !(obj isa Balloon) && board[p1...] == brick && !(board[p0...] in (tree,brick))
-                            p1 = p0
+                    game = init_game(term)
+                    while true
+                        update(game)
+                        flush(logio) # Hack!
+                        key = read_key()
+                        if key == CTRL_C
+                            # Clear
+                            clear_screen(stdout)
+                            return
+                        elseif key == CTRL_R
+                            clear_screen(stdout)
+                            break
                         end
-                        push!(new_positions, p1)
-                    end
-                    sprites_new = []
-                    for (p1,obj) in zip(new_positions,sprites)
-                        obj = transition!(obj, board, p1)
-                        if !isnothing(obj)
-                            if obj isa AbstractArray
-                                append!(sprites_new, obj)
-                            else
-                                obj::Sprite
-                                push!(sprites_new, obj)
-                            end
-                        end
-                    end
-                    sprites = filter(sprites_new) do s
-                        p = s.pos
-                        1 <= p[1] <= size(board,1) && 1 <= p[2] <= size(board,2)
+                        game.input_key = key
                     end
                 end
             end
         end
     end
 end
-
-# board initialization
-function addrand!(cs, c, prob::Real)
-    for i = 1:length(cs)
-        if rand() < prob && cs[i] == ' '
-            cs[i] = c
-        end
-    end
-end
-
-sheight,swidth = displaysize(stdout)
-height = sheight
-width = (swidth - sidebar_width*2) ÷ 2
-
-#=
-# Level of correllated noise
-# A few steps to create correlated noise
-#board = fill(' ', height, width)
-#addrand!(board, brick, 0.5)
-for k=1:3
-    for i = 1:size(board,1), j=1:size(board,2)
-        i2 = clamp(i + rand(-1:1), 1, size(board,1))
-        j2 = clamp(j + rand(-1:1), 1, size(board,2))
-        c = board[i2, j2]
-        if board[i,j] != c
-            board[i,j] = c
-        end
-    end
-end
-=#
-
-board = generate_maze((width,height))
-
-addrand!(board, cupcake, 0.02)
-addrand!(board, '🍕', 0.05)
-addrand!(board, tree, 0.01)
-addrand!(board, '💧', 0.01)
-addrand!(board, '💣', 0.03)
-for f in fruits
-    addrand!(board, f, 0.01)
-end
-
-middle = size(board) .÷ 2
-girl = Girl(middle)
-boy = Boy(middle)
-push!(girl.items, '💣')
-push!(boy.items, '💣')
-
-sprites = vcat(
-    [Dog((rand(1:width),rand(1:height))) for i=1:4],
-    [ExplodingPineapple((rand(1:width),rand(1:height))) for i=1:3],
-    girl,
-    boy,
-)
-
-
-#printboard(stdout, generate_maze(height, width))
-
-main_loop!(board, sprites)
-
-end
-
-nothing
