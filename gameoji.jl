@@ -538,6 +538,27 @@ function seed_rand!(ledger::AbstractLedger, board, components::ComponentData...)
     Entity(ledger, SpatialComp(pos, VI[0,0]), components...)
 end
 
+function flood_fill!(ledger::AbstractLedger, board, position, max_fill, components::ComponentData...)
+    # Temporary copy to record where we've flood filled
+    board = copy(board)
+    positions = Vec2I[position]
+    nfilled = 0
+    while !isempty(positions) && nfilled < max_fill
+        p = pop!(positions)
+        for i=max(p[1]-1, 1):min(p[1]+1,size(board,1))
+            for j=max(p[2]-1, 1):min(p[2]+1,size(board,2))
+                if board[i,j] == ' '
+                    board[i,j] = 'x' # Record filled
+                    nfilled += 1
+                    q = VI[i,j]
+                    push!(positions, q)
+                    Entity(ledger, SpatialComp(q, VI[0,0]), components...)
+                end
+            end
+        end
+    end
+end
+
 function init_game(term)
     game = Gameoji(term)
 
@@ -610,7 +631,7 @@ function init_game(term)
 
     # Collectibles
     fruits = collect("🍉🍌🍏🍐🍑🍒🍓")
-    for _=1:100
+    for _=1:200
         seed_rand!(game.ledger, game.board,
                    CollectibleComp(),
                    SpriteComp(rand(fruits), 2))
@@ -647,12 +668,23 @@ function init_game(term)
                    ExplosionComp(rand(1:100)+rand(1:100), 1))
     end
 
+    # FIXME: These seeding functions only see the walls, not the collectibles
+    # which already exist, but are in the ledger rather than the board.
+
     # Bombs which may be collected, but explode if there's an explosion
-    for _=1:prod(game.board_size)
+    for _ = 1:length(game.board)÷10
         seed_rand!(game.ledger, game.board,
                    SpriteComp('💣', 1),
                    ExplosiveReactionComp(:explode),
                    CollectibleComp())
+    end
+    # Bomb concentrations!
+    for _=1:2
+        flood_fill!(game.ledger, game.board, rand_unoccupied_pos(game.board),
+                    length(game.board)÷10,
+                    SpriteComp('💣', 1),
+                    ExplosiveReactionComp(:explode),
+                    CollectibleComp())
     end
 
     game
