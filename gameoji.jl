@@ -369,7 +369,7 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
 
             if value == '💣' && has_item
                 clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗💣🕘💣🕙💣🕚")
-                e = Entity(m,
+                time_bomb = Entity(m,
                            SpatialComp(position, VI[0,0]),
                            TimerComp(),
                            SpriteComp('💣', 20),
@@ -377,10 +377,10 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
                            ExplosionComp(length(clocks), 2),
                            ExplosiveReactionComp(:none)
                           )
-                # "Crazy bomb"
-                # 5 % chance of a randomly walking ticking bomb :-D
                 if rand() < 0.05
-                    m[e] = RandomVelocityControlComp()
+                    # "Crazy bomb"
+                    # 5 % chance of a randomly walking ticking bomb :-D
+                    m[time_bomb] = RandomVelocityControlComp()
                 end
             elseif value == '💠' && has_item
                 # Player healing other player.
