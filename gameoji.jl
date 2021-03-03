@@ -637,14 +637,14 @@ function init_game(term)
                    SpriteComp(rand(fruits), 2))
     end
     treasure = collect("💰💎")
-    for _=1:10
+    for _=1:20
         seed_rand!(game.ledger, game.board,
                    CollectibleComp(),
                    SpriteComp(rand(treasure), 2))
     end
 
-    treasure = collect("💰💎")
-    for _=1:2
+    # Health packs
+    for _=1:10
         seed_rand!(game.ledger, game.board,
                    CollectibleComp(),
                    SpriteComp('💠', 2))
