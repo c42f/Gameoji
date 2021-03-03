@@ -43,12 +43,12 @@ end
 @component struct InventoryComp
     items::Items
 end
+InventoryComp() = InventoryComp(Items())
 
 @component struct PlayerInfoComp
+    base_icon::Char
     number::Int
 end
-
-InventoryComp() = InventoryComp(Items())
 
 @component struct PlayerControlComp
     keymap::Dict{Any,Tuple{Symbol,Any}}
@@ -329,20 +329,22 @@ end
 
 struct PlayerControlUpdate <: System end
 
-Overseer.requested_components(::PlayerControlUpdate) = (SpatialComp, PlayerControlComp, SpriteComp)
+Overseer.requested_components(::PlayerControlUpdate) = (SpatialComp, PlayerControlComp, SpriteComp, InventoryComp, PlayerInfoComp)
 
 function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
-	spatial_comp = m[SpatialComp]
+	spatial = m[SpatialComp]
 	controls = m[PlayerControlComp]
-    sprite_comp = m[SpriteComp]
-    for e in @entities_in(spatial_comp && controls && sprite_comp)
-        if sprite_comp[e].icon == '💀'
+    sprite = m[SpriteComp]
+    inventory = m[InventoryComp]
+    player_info = m[PlayerInfoComp]
+    for e in @entities_in(spatial && controls && sprite && inventory)
+        if sprite[e].icon == '💀'
             # Player is dead.
             # TODO: Might want to use something other than the icon for this
             # state machine!
             continue
         end
-        position = spatial_comp[e].position
+        position = spatial[e].position
         velocity = VI[0,0]
         action,value = get(controls[e].keymap, m.input_key, (:none,nothing))
         if action === :move
@@ -351,21 +353,40 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
             # Some tests of various entity combinations
 
             # Rising Balloon
+            #=
             Entity(m, SpatialComp(position, VI[0,1]),
                    SpriteComp('🎈', 1))
+            =#
 
-            # Ticking, random walking bomb. Lol
-            clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗💣🕘💣🕙💣🕚")
-            Entity(m, SpatialComp(position, VI[0,0]),
-                   #RandomVelocityControlComp(),
-                   TimerComp(),
-                   SpriteComp('💣', 1),
-                   AnimatedSpriteComp(clocks),
-                   ExplosionComp(length(clocks), 2),
-                   ExplosiveReactionComp(:none)
-                   )
+            has_item = !isnothing(pop!(inventory[e].items, value))
+
+            if value == '💣' && has_item
+                clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗💣🕘💣🕙💣🕚")
+                e = Entity(m,
+                           SpatialComp(position, VI[0,0]),
+                           TimerComp(),
+                           SpriteComp('💣', 20),
+                           AnimatedSpriteComp(clocks),
+                           ExplosionComp(length(clocks), 2),
+                           ExplosiveReactionComp(:none)
+                          )
+                # 2 % chance of a randomly walking ticking bomb :-D
+                if rand() < 0.2
+                    m[e] = RandomVelocityControlComp()
+                end
+            elseif value == '💠' && has_item
+                # Player healing other player.
+                # TODO: Move this out to be a more generic effect in its own system?
+                for other_e in @entities_in(spatial && player_info && sprite)
+                    if spatial[other_e].position == position
+                        sprite[other_e] = SpriteComp(player_info[other_e].base_icon,
+                                                     sprite[other_e].draw_priority)
+                    end
+                end
+                sprite = m[SpriteComp]
+            end
         end
-        spatial_comp[e] = SpatialComp(position, velocity)
+        spatial[e] = SpatialComp(position, velocity)
 	end
 end
 
@@ -521,15 +542,16 @@ function init_game(term)
               ARROW_DOWN =>(:move, VI[0,-1]),
               ARROW_LEFT =>(:move, VI[-1,0]),
               ARROW_RIGHT=>(:move, VI[1, 0]),
-              '0'        =>(:use_item, nothing))
+              '0'        =>(:use_item, '💣'),
+              '9'        =>(:use_item, '💠'))
 
     board_centre = game.board_size .÷ 2
 
     Entity(game.ledger,
         SpatialComp(board_centre, VI[0,0]),
         PlayerControlComp(right_hand_keymap),
-        InventoryComp(),
-        PlayerInfoComp(1),
+        InventoryComp(Items('💣'=>1)),
+        PlayerInfoComp('👦', 1),
         SpriteComp('👦', 1000),
         CollisionComp(1),
         ExplosiveReactionComp(:die),
@@ -540,13 +562,14 @@ function init_game(term)
               's'=>(:move, VI[0,-1]),
               'a'=>(:move, VI[-1,0]),
               'd'=>(:move, VI[1, 0]),
-              '1'=>(:use_item, nothing))
+              '1'=>(:use_item, '💣'),
+              '2'=>(:use_item, '💠'))
 
     Entity(game.ledger,
         SpatialComp(board_centre, VI[0,0]),
         PlayerControlComp(left_hand_keymap),
-        InventoryComp(),
-        PlayerInfoComp(1),
+        InventoryComp(Items('💣'=>1, '💠'=>1)),
+        PlayerInfoComp('👧', 2),
         SpriteComp('👧', 1000),
         CollisionComp(1),
         ExplosiveReactionComp(:die),
@@ -589,6 +612,13 @@ function init_game(term)
         seed_rand!(game.ledger, game.board,
                    CollectibleComp(),
                    SpriteComp(rand(treasure), 2))
+    end
+
+    treasure = collect("💰💎")
+    for _=1:2
+        seed_rand!(game.ledger, game.board,
+                   CollectibleComp(),
+                   SpriteComp('💠', 2))
     end
 
     monsters = collect("👺👹")
@@ -637,7 +667,6 @@ function main()
                         update(game)
                         flush(logio) # Hack!
                         key = read_key()
-                        @info "key" key
                         if key == CTRL_C
                             # Clear
                             clear_screen(stdout)

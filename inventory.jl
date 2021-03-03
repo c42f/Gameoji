@@ -3,6 +3,7 @@ struct Items
 end
 
 Items() = Items(Dict{Char,Int}())
+Items(pairs::Pair...) = Items(Dict{Char,Int}(pairs...))
 
 Base.haskey(i::Items, x) = haskey(i.d, x)
 
