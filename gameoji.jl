@@ -8,6 +8,7 @@ using Overseer
 using StaticArrays
 using REPL
 using Logging
+import StatsBase
 
 const Vec2I = SVector{2,Int}
 const VI = SA{Int}
@@ -357,14 +358,8 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
         if action === :move
             velocity = value
         elseif action == :use_item
-            # Some tests of various entity combinations
-
-            # Rising Balloon
-            #=
-            Entity(m, SpatialComp(position, VI[0,1]),
-                   SpriteComp('🎈', 1))
-            =#
-
+            # TODO: Should we use the returned entity in some way rather than
+            # reconstructing it?
             has_item = !isnothing(pop!(inventory[e].items, value))
 
             if value == '💣' && has_item
@@ -413,17 +408,19 @@ function Overseer.update(::InventoryCollectionUpdate, m::AbstractLedger)
     collectors = [(pos=spatial[e].position, items=inventory[e].items)
                   for e in @entities_in(inventory && spatial)]
 
+    to_delete = Entity[]
     for e in @entities_in(spatial && collectible && sprite)
         pos = spatial[e].position
         for collector in collectors
             if pos == collector.pos
-                push!(collector.items, sprite[e].icon)
-                schedule_delete!(m, e)
+                push!(collector.items, e)
+                # When it's in an inventory, simply delete the spatial component
+                push!(to_delete, e)
                 break
             end
         end
     end
-    delete_scheduled!(m)
+    delete!(spatial, to_delete)
 end
 
 # Graphics & Rendering
@@ -477,7 +474,8 @@ function Overseer.update(::TerminalRenderer, m::AbstractLedger)
         else
             continue
         end
-        for (j,(item,count)) in enumerate(inventory[e].items)
+        item_counts = StatsBase.countmap([sprite_comp[i].icon for i in inventory[e].items])
+        for (j,(item,count)) in enumerate(item_counts)
             if j > length(sidebar)
                 break
             end
@@ -579,7 +577,7 @@ function init_game(term)
     Entity(game.ledger,
         SpatialComp(board_centre, VI[0,0]),
         PlayerControlComp(right_hand_keymap),
-        InventoryComp(Items('💣'=>1)),
+        InventoryComp(Items(game.ledger, Entity(game.ledger, SpriteComp('💣', 2)))),
         PlayerInfoComp('👦', 1),
         SpriteComp('👦', 1000),
         CollisionComp(1),
@@ -597,7 +595,7 @@ function init_game(term)
     Entity(game.ledger,
         SpatialComp(board_centre, VI[0,0]),
         PlayerControlComp(left_hand_keymap),
-        InventoryComp(Items('💣'=>1)),
+        InventoryComp(Items(game.ledger, Entity(game.ledger, SpriteComp('💣', 2)))),
         PlayerInfoComp('👧', 2),
         SpriteComp('👧', 1000),
         CollisionComp(1),

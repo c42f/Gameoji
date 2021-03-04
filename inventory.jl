@@ -1,36 +1,28 @@
+# Items, keyed by glyph
 struct Items
-    d::Dict{Char,Int}
+    table::AbstractLedger
+    es::Vector{Entity}
 end
 
-Items() = Items(Dict{Char,Int}())
-Items(pairs::Pair...) = Items(Dict{Char,Int}(pairs...))
+Items(table::AbstractLedger) = Items(table, Vector{Entity}())
+Items(table::AbstractLedger, entities::Entity...) = Items(table, Entity[entities...])
 
-Base.haskey(i::Items, x) = haskey(i.d, x)
-
-function Base.push!(i::Items, x)
-    if !haskey(i, x)
-        i.d[x] = 1
-    else
-        i.d[x] += 1
-    end
+function _find_by_icon(items::Items, c::Char)
+    sprite = items.table[SpriteComp]
+    findfirst(e->(e in sprite && sprite[e].icon == c), items.es)
 end
 
-function Base.pop!(i::Items, x)
-    if haskey(i, x)
-        n = i.d[x] - 1
-        if n == 0
-            pop!(i.d, x)
-        else
-            i.d[x] = n
-        end
-        x
-    else
-        nothing
-    end
+Base.haskey(items::Items, c::Char) = !isnothing(_find_by_icon(items, c))
+
+Base.push!(items::Items, e::Entity) = push!(items.es, e)
+
+function Base.pop!(items::Items, c::Char)
+    i = _find_by_icon(items, c)
+    isnothing(i) ? nothing : splice!(items.es, i)
 end
 
-Base.iterate(i::Items) = iterate(i.d)
-Base.iterate(i::Items, state) = iterate(i.d, state)
-Base.length(i::Items) = length(i.d)
-Base.eltype(i::Items) = Pair{Char,Int}
+Base.iterate(items::Items) = iterate(items.es)
+Base.iterate(items::Items, state) = iterate(items.es, state)
+Base.length(items::Items) = length(items.es)
+Base.eltype(items::Items) = Entity
 
