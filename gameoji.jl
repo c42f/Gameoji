@@ -595,10 +595,17 @@ function init_game(term)
 
     board_centre = game.board_size .÷ 2
 
+    function init_inventory(ledger)
+        items = Items(ledger)
+        for i=1:5
+            push!(items, Entity(game.ledger, SpriteComp('💣', 2)))
+        end
+        items
+    end
     Entity(game.ledger,
         SpatialComp(board_centre, VI[0,0]),
         PlayerControlComp(right_hand_keymap),
-        InventoryComp(Items(game.ledger, Entity(game.ledger, SpriteComp('💣', 2)))),
+        InventoryComp(init_inventory(game.ledger)),
         PlayerInfoComp('👦', 1),
         SpriteComp('👦', 1000),
         CollisionComp(1),
@@ -616,7 +623,7 @@ function init_game(term)
     Entity(game.ledger,
         SpatialComp(board_centre, VI[0,0]),
         PlayerControlComp(left_hand_keymap),
-        InventoryComp(Items(game.ledger, Entity(game.ledger, SpriteComp('💣', 2)))),
+        InventoryComp(init_inventory(game.ledger)),
         PlayerInfoComp('👧', 2),
         SpriteComp('👧', 1000),
         CollisionComp(1),
@@ -691,16 +698,18 @@ function init_game(term)
     # which already exist, but are in the ledger rather than the board.
 
     # Bombs which may be collected, but explode if there's an explosion
+    #=
     for _ = 1:length(board_chars)÷10
         seed_rand!(game.ledger, board_chars,
                    SpriteComp('💣', 1),
                    ExplosiveReactionComp(:explode),
                    CollectibleComp())
     end
+    =#
     # Bomb concentrations!
     for _=1:2
         flood_fill!(game.ledger, board_chars, rand_unoccupied_pos(board_chars),
-                    length(board_chars)÷10,
+                    length(board_chars)÷20,
                     SpriteComp('💣', 1),
                     ExplosiveReactionComp(:explode),
                     CollectibleComp())
