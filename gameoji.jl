@@ -5,6 +5,8 @@ exec julia --project=. -e 'include(popfirst!(ARGS)); main()' \
 =#
 
 using Overseer
+using Overseer: EMPTY_ENTITY
+
 using StaticArrays
 using REPL
 using Logging
@@ -110,21 +112,24 @@ Overseer.requested_components(::PositionUpdate) = (SpatialComp,CollisionComp)
 
 function Overseer.update(::PositionUpdate, m::AbstractLedger)
 	spatial = m[SpatialComp]
-
     collision = m[CollisionComp]
 
-    collidables = [(s=spatial[e], c=collision[e], e=e) for e in @entities_in(spatial && collision)]
-    sort!(collidables, by=obj->obj.c.mass, rev=true)
+    collidables = collect(@entities_in(spatial && collision))
+    sort!(collidables, by=e->collision[e].mass, rev=true)
 
-    board = m.board
+    board = empty_board(m)
     for obj in collidables
-        pos = obj.s.position
-        new_pos = obj.s.position + obj.s.velocity
+        pos = spatial[obj].position
+        new_pos = pos + spatial[obj].velocity
         if #==# new_pos[1] < 1 || size(board,1) < new_pos[1] ||
                 new_pos[2] < 1 || size(board,2) < new_pos[2] ||
-                (board[pos...] == ' ' && board[new_pos...] != ' ')
+                (board[pos...] == EMPTY_ENTITY && board[new_pos...] != EMPTY_ENTITY)
+                             # ^^ Allows us to get unstuck if we're in the wall 😬
             # Inelastic collision with walls / border
-            spatial[obj.e] = SpatialComp(pos, VI[0,0])
+            spatial[obj] = SpatialComp(pos, VI[0,0])
+        end
+        if board[pos...] == EMPTY_ENTITY
+            board[pos...] = obj
         end
     end
 
@@ -272,9 +277,6 @@ function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
     for e in @entities_in(spatial && killer_tag)
         pos = spatial[e].position
         push!(killer_positions, pos)
-        if 1 <= pos[1] <= m.board_size[1] && 1 <= pos[2] <= m.board_size[2]
-            m.board[pos...] = ' '
-        end
     end
     for e in @entities_in(spatial)
         if !(e in killer_tag) && (spatial[e].position in killer_positions)
@@ -294,11 +296,7 @@ function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
     exp_damage = m[ExplosionDamageComp]
     explosion_positions = Set{Vec2I}()
     for e in @entities_in(spatial && exp_damage)
-        pos = spatial[e].position
-        push!(explosion_positions, pos)
-        if 1 <= pos[1] <= m.board_size[1] && 1 <= pos[2] <= m.board_size[2]
-            m.board[pos...] = ' '
-        end
+        push!(explosion_positions, spatial[e].position)
     end
     reaction = m[ExplosiveReactionComp]
     sprite = m[SpriteComp]
@@ -453,7 +451,7 @@ function Overseer.update(::TerminalRenderer, m::AbstractLedger)
     drawables = [(spatial=spatial_comp[e], sprite=sprite_comp[e], id=e.id)
                  for e in @entities_in(spatial_comp && sprite_comp)]
     sort!(drawables, by=obj->(obj.sprite.draw_priority,obj.id))
-    board = copy(m.board)
+    board = fill(' ', m.board_size...)
     # Fill in board
     for obj in drawables
         pos = obj.spatial.position
@@ -464,8 +462,8 @@ function Overseer.update(::TerminalRenderer, m::AbstractLedger)
     # Collect and render inventories
     inventory = m[InventoryComp]
     player_info = m[PlayerInfoComp]
-    left_sidebar = fill("", size(m.board,2))
-    right_sidebar = fill("", size(m.board,2))
+    left_sidebar = fill("", m.board_size[2])
+    right_sidebar = fill("", m.board_size[2])
     for e in @entities_in(inventory && player_info)
         if player_info[e].number == 1
             sidebar = right_sidebar
@@ -494,14 +492,12 @@ mutable struct Gameoji <: AbstractLedger
     term
     input_key
     board_size::Vec2I
-    board::Matrix{Char}
     ledger::Ledger
 end
 
 function Gameoji(term)
     h,w = displaysize(stdout)
     board_size = VI[(w-2*sidebar_width)÷2, h]
-    board = fill(' ', tuple(board_size...))
     ledger = Ledger(
         Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerControlUpdate()]),
         Stage(:dynamics, [PositionUpdate()]),
@@ -510,7 +506,7 @@ function Gameoji(term)
         Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
         Stage(:dynamics_post, [TimerUpdate()]),
     )
-    Gameoji(term, '\0', board_size, board, ledger)
+    Gameoji(term, '\0', board_size, ledger)
 end
 
 function Base.show(io::IO, game::Gameoji)
@@ -557,10 +553,35 @@ function flood_fill!(ledger::AbstractLedger, board, position, max_fill, componen
     end
 end
 
+empty_board(game::Gameoji) = empty_board(game.board_size)
+empty_board(board_size::AbstractVector) = fill(EMPTY_ENTITY, board_size...)
+
+function fill_board(board_size, ledger, entities)
+    board = empty_board(board_size)
+    spatial = ledger[SpatialComp]
+    for e in entities
+        pos = spatial[e].position
+    end
+    board
+end
+
 function init_game(term)
     game = Gameoji(term)
 
-    game.board = generate_maze(tuple(game.board_size...))
+    board_chars = generate_maze(tuple(game.board_size...))
+
+    # Convert maze board into entities
+    for i in 1:game.board_size[1]
+        for j in 1:game.board_size[2]
+            c = board_chars[i,j]
+            if c != ' '
+                Entity(game.ledger,
+                       SpriteComp(c, 0),
+                       SpatialComp(VI[i,j], VI[0,0]),
+                       CollisionComp(100))
+            end
+        end
+    end
 
     # Set up players
     # Right hand keyboard controls
@@ -616,9 +637,9 @@ function init_game(term)
     =#
 
     # Flocking chickens
-    #boid_pos = rand_unoccupied_pos(game.board)
+    #boid_pos = rand_unoccupied_pos(board_chars)
     for _=1:30
-        seed_rand!(game.ledger, game.board,
+        seed_rand!(game.ledger, board_chars,
                    # SpatialComp(boid_pos, VI[rand(-1:1), rand(-1:1)]),
                    #RandomVelocityControlComp(),
                    BoidControlComp(),
@@ -630,27 +651,27 @@ function init_game(term)
     # Collectibles
     fruits = collect("🍉🍌🍏🍐🍑🍒🍓")
     for _=1:200
-        seed_rand!(game.ledger, game.board,
+        seed_rand!(game.ledger, board_chars,
                    CollectibleComp(),
                    SpriteComp(rand(fruits), 2))
     end
     treasure = collect("💰💎")
     for _=1:20
-        seed_rand!(game.ledger, game.board,
+        seed_rand!(game.ledger, board_chars,
                    CollectibleComp(),
                    SpriteComp(rand(treasure), 2))
     end
 
     # Health packs
     for _=1:10
-        seed_rand!(game.ledger, game.board,
+        seed_rand!(game.ledger, board_chars,
                    CollectibleComp(),
                    SpriteComp('💠', 2))
     end
 
     monsters = collect("👺👹")
     for _=1:5
-        seed_rand!(game.ledger, game.board,
+        seed_rand!(game.ledger, board_chars,
                    RandomVelocityControlComp(),
                    EntityKillerComp(),
                    CollisionComp(1),
@@ -659,7 +680,7 @@ function init_game(term)
 
     # Exploding pineapples
     for _=1:5
-        seed_rand!(game.ledger, game.board,
+        seed_rand!(game.ledger, board_chars,
                    CollectibleComp(),
                    SpriteComp('🍍', 2),
                    TimerComp(),
@@ -670,16 +691,16 @@ function init_game(term)
     # which already exist, but are in the ledger rather than the board.
 
     # Bombs which may be collected, but explode if there's an explosion
-    for _ = 1:length(game.board)÷10
-        seed_rand!(game.ledger, game.board,
+    for _ = 1:length(board_chars)÷10
+        seed_rand!(game.ledger, board_chars,
                    SpriteComp('💣', 1),
                    ExplosiveReactionComp(:explode),
                    CollectibleComp())
     end
     # Bomb concentrations!
     for _=1:2
-        flood_fill!(game.ledger, game.board, rand_unoccupied_pos(game.board),
-                    length(game.board)÷10,
+        flood_fill!(game.ledger, board_chars, rand_unoccupied_pos(board_chars),
+                    length(board_chars)÷10,
                     SpriteComp('💣', 1),
                     ExplosiveReactionComp(:explode),
                     CollectibleComp())
