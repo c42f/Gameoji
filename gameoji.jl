@@ -115,21 +115,29 @@ function Overseer.update(::PositionUpdate, m::AbstractLedger)
     collision = m[CollisionComp]
 
     collidables = collect(@entities_in(spatial && collision))
-    sort!(collidables, by=e->collision[e].mass, rev=true)
 
-    board = empty_board(m)
+    max_mass = fill(0, m.board_size...)
+    for obj in collidables
+        pos = spatial[obj].position
+        mass = collision[obj].mass
+        if max_mass[pos...] < mass
+            max_mass[pos...] = mass
+        end
+    end
+
+    @info "" reverse(transpose(max_mass), dims=2)
+
     for obj in collidables
         pos = spatial[obj].position
         new_pos = pos + spatial[obj].velocity
-        if #==# new_pos[1] < 1 || size(board,1) < new_pos[1] ||
-                new_pos[2] < 1 || size(board,2) < new_pos[2] ||
-                (board[pos...] == EMPTY_ENTITY && board[new_pos...] != EMPTY_ENTITY)
-                             # ^^ Allows us to get unstuck if we're in the wall 😬
+        obj_mass = collision[obj].mass
+        if #==# new_pos[1] < 1 || m.board_size[1] < new_pos[1] ||
+                new_pos[2] < 1 || m.board_size[2] < new_pos[2] ||
+                (max_mass[new_pos...] > obj_mass &&
+                 max_mass[pos...] >= obj_mass)
+                # ^^ Allows us to get unstuck if we're in the wall 😬
             # Inelastic collision with walls / border
             spatial[obj] = SpatialComp(pos, VI[0,0])
-        end
-        if board[pos...] == EMPTY_ENTITY
-            board[pos...] = obj
         end
     end
 
