@@ -7,7 +7,6 @@ Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Overseer = "1ada24be-c16d-4464-9f61-27c2e0f16645"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
-TerminalMenus = "dc548174-15c3-5faf-af27-7997cfbde655"
 
 [compat]
 julia = "1.6"

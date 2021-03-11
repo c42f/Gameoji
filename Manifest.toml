@@ -279,12 +279,6 @@ uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 deps = ["ArgTools", "SHA"]
 uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
 
-[[TerminalMenus]]
-deps = ["Compat", "REPL", "Test"]
-git-tree-sha1 = "9ae6ed0c94eee4d898e049820942af21daf15efc"
-uuid = "dc548174-15c3-5faf-af27-7997cfbde655"
-version = "0.1.0"
-
 [[Test]]
 deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
 uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

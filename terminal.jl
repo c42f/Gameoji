@@ -1,6 +1,6 @@
-using TerminalMenus
+using REPL.TerminalMenus
 
-using TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
+using REPL.TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
 const CTRL_C = Char(3)
 const CTRL_R = '\x12'
 
@@ -72,24 +72,21 @@ function printboard(io, board, left_sidebar=nothing, right_sidebar=nothing)
 end
 
 function rawmode(f, term)
-    raw_mode_enabled = TerminalMenus.enableRawMode(term)
+    REPL.Terminals.raw!(term, true)
     try
-        # Stolen from TerminalMenus
-        raw_mode_enabled && print(term.out_stream, "\x1b[?25l") # hide the cursor
+        print(term.out_stream, "\x1b[?25l") # hide the cursor
         f()
     finally
-        if raw_mode_enabled
-            print(term.out_stream, "\x1b[?25h") # unhide cursor
-            TerminalMenus.disableRawMode(term)
-        end
+        print(term.out_stream, "\x1b[?25h") # unhide cursor
+        REPL.Terminals.raw!(term, false)
     end
 end
 
 function read_key(io=stdin)
-    k = TerminalMenus.readKey(io)
+    k = REPL.TerminalMenus.readkey(io)
     if k in Int.((ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT))
-        return TerminalMenus.Key(k)
-    elseif k == 3 #=^C=#
+        return REPL.TerminalMenus.Key(k)
+    elseif k == 3
         return CTRL_C
     else
         return Char(k)
