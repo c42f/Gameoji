@@ -369,7 +369,7 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
             has_item = !isnothing(pop!(inventory[e].items, value))
 
             if value == '💣' && has_item
-                clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗💣🕘💣🕙💣🕚")
+                clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚")
                 time_bomb = Entity(m,
                            SpatialComp(position, VI[0,0]),
                            TimerComp(),
@@ -573,15 +573,94 @@ function fill_board(board_size, ledger, entities)
     board
 end
 
+#=
+moons = collect("🌑🌒🌓🌔🌕🌖🌗🌘")
+fruits = collect("🍅🍆🍇🍈🍉🍊🍋🍌🍍🍎🍏🍐🍑🍒🍓")
+flowers = collect("💮🌼💐🌺🌹🌸🌷🌻🏵")
+plants = collect("🌲🌳🌱🌴🌵🌴🌳🌿🍀🍁🍂🍄")
+food = collect("🌽🌾")
+treasure = collect("💰💎")
+animals = collect("🐇🐝🐞🐤🐥🐦🐧🐩🐪🐫")
+water_animals = collect("🐬🐳🐙🐊🐋🐟🐠🐡")
+buildings = collect("🏰🏯🏪🏫🏬🏭🏥")
+monsters = collect("👻👺👹👽🧟")
+=#
+
+function string_to_layout(str)
+    # Remove every second ascii char
+    ascii_despace(s) = [c for (i,c) in enumerate(s) if !isascii(c) || iseven(i)]
+    rows = ascii_despace.(split(str, '\n'))
+    maxlen = maximum(length.(rows))
+    reverse(hcat([[r; fill(' ', maxlen-length(r))] for r in rows]...), dims=2)
+end
+
+function make_vault(board_size, background_chars, ledger)
+    layout = string_to_layout("""
+          ⬛⬛⬛⬛⬛⬛
+        ⬛............⬛
+        ⬛............⬛
+        ⬛............⬛
+        ⬛............⬛
+        ⬛............⬛
+          ⬛⬛🚪⬛⬛⬛  """)
+
+    sz = size(layout)
+
+    start = VI[rand(2:(board_size[1] - sz[1] - 1)),
+               rand(2:(board_size[2] - sz[2] - 1))]
+
+    to_delete = Set{Vec2I}()
+    new_entities = Set{Entity}()
+
+    treasure = "💠💰💎"
+    for i = 1:size(layout,1)
+        for j = 1:size(layout,2)
+            c = layout[i,j]
+            if c == ' '
+                continue
+            end
+            pos = start + VI[i,j]
+            background_chars[pos...] = c
+            push!(to_delete, pos)
+            spatialcomp = SpatialComp(pos, VI[0,0])
+            if c == '.'
+                e = Entity(ledger, spatialcomp,
+                       SpriteComp(rand(treasure), 2),
+                       CollectibleComp()
+                      )
+            elseif c == '⬛'
+                e = Entity(ledger, spatialcomp,
+                       SpriteComp(c, 0),
+                       CollisionComp(100),
+                       ExplosiveReactionComp(:none),
+                      )
+            else
+                e = Entity(ledger, spatialcomp,
+                       SpriteComp(c, 0),
+                      )
+            end
+            push!(new_entities, e)
+        end
+    end
+
+    spatial = ledger[SpatialComp]
+    for e in @entities_in(spatial)
+        if spatial[e].position in to_delete && !(e in new_entities)
+            schedule_delete!(ledger, e)
+        end
+    end
+    delete_scheduled!(ledger)
+end
+
 function init_game(term)
     game = Gameoji(term)
 
-    board_chars = generate_maze(tuple(game.board_size...))
+    background_chars = generate_maze(tuple(game.board_size...))
 
     # Convert maze board into entities
     for i in 1:game.board_size[1]
         for j in 1:game.board_size[2]
-            c = board_chars[i,j]
+            c = background_chars[i,j]
             if c != ' '
                 Entity(game.ledger,
                        SpriteComp(c, 0),
@@ -590,6 +669,8 @@ function init_game(term)
             end
         end
     end
+
+    make_vault(game.board_size, background_chars, game.ledger)
 
     # Set up players
     # Right hand keyboard controls
@@ -652,9 +733,9 @@ function init_game(term)
     =#
 
     # Flocking chickens
-    #boid_pos = rand_unoccupied_pos(board_chars)
+    #boid_pos = rand_unoccupied_pos(background_chars)
     for _=1:30
-        seed_rand!(game.ledger, board_chars,
+        seed_rand!(game.ledger, background_chars,
                    # SpatialComp(boid_pos, VI[rand(-1:1), rand(-1:1)]),
                    #RandomVelocityControlComp(),
                    BoidControlComp(),
@@ -666,27 +747,27 @@ function init_game(term)
     # Collectibles
     fruits = collect("🍉🍌🍏🍐🍑🍒🍓")
     for _=1:200
-        seed_rand!(game.ledger, board_chars,
+        seed_rand!(game.ledger, background_chars,
                    CollectibleComp(),
                    SpriteComp(rand(fruits), 2))
     end
     treasure = collect("💰💎")
     for _=1:20
-        seed_rand!(game.ledger, board_chars,
+        seed_rand!(game.ledger, background_chars,
                    CollectibleComp(),
                    SpriteComp(rand(treasure), 2))
     end
 
     # Health packs
     for _=1:10
-        seed_rand!(game.ledger, board_chars,
+        seed_rand!(game.ledger, background_chars,
                    CollectibleComp(),
                    SpriteComp('💠', 2))
     end
 
     monsters = collect("👺👹")
     for _=1:5
-        seed_rand!(game.ledger, board_chars,
+        seed_rand!(game.ledger, background_chars,
                    RandomVelocityControlComp(),
                    EntityKillerComp(),
                    CollisionComp(1),
@@ -695,7 +776,7 @@ function init_game(term)
 
     # Exploding pineapples
     for _=1:5
-        seed_rand!(game.ledger, board_chars,
+        seed_rand!(game.ledger, background_chars,
                    CollectibleComp(),
                    SpriteComp('🍍', 2),
                    TimerComp(),
@@ -707,8 +788,8 @@ function init_game(term)
 
     # Bombs which may be collected, but explode if there's an explosion
     #=
-    for _ = 1:length(board_chars)÷10
-        seed_rand!(game.ledger, board_chars,
+    for _ = 1:length(background_chars)÷10
+        seed_rand!(game.ledger, background_chars,
                    SpriteComp('💣', 1),
                    ExplosiveReactionComp(:explode),
                    CollectibleComp())
@@ -716,8 +797,8 @@ function init_game(term)
     =#
     # Bomb concentrations!
     for _=1:2
-        flood_fill!(game.ledger, board_chars, rand_unoccupied_pos(board_chars),
-                    length(board_chars)÷20,
+        flood_fill!(game.ledger, background_chars, rand_unoccupied_pos(background_chars),
+                    length(background_chars)÷20,
                     SpriteComp('💣', 1),
                     ExplosiveReactionComp(:explode),
                     CollectibleComp())
