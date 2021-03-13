@@ -19,6 +19,7 @@ const Vec2I = SVector{2,Int}
 const VI = SA{Int}
 
 include("inventory.jl")
+include("terminal.jl")
 
 #-------------------------------------------------------------------------------
 # Components for game entities
@@ -127,8 +128,6 @@ function Overseer.update(::PositionUpdate, m::AbstractLedger)
             max_mass[pos...] = mass
         end
     end
-
-    @info "" reverse(transpose(max_mass), dims=2)
 
     for obj in collidables
         pos = spatial[obj].position
@@ -655,6 +654,55 @@ function make_vault(board_size, background_chars, ledger)
     delete_scheduled!(ledger)
 end
 
+function reconstruct_background(game)
+    background = fill(' ', game.board_size...)
+    collision = game.ledger[CollisionComp]
+    spatial = game.ledger[SpatialComp]
+    sprite = game.ledger[SpriteComp]
+    for e in @entities_in(collision && spatial)
+        if collision[e].mass >= 100 # assumed to be background/walls
+            pos = spatial[e].position
+            background[pos...] = sprite[e].icon
+        end
+    end
+    background
+end
+
+right_hand_keymap =
+    Dict(ARROW_UP   =>(:move, VI[0, 1]),
+         ARROW_DOWN =>(:move, VI[0,-1]),
+         ARROW_LEFT =>(:move, VI[-1,0]),
+         ARROW_RIGHT=>(:move, VI[1, 0]),
+         '0'        =>(:use_item, '💣'),
+         '9'        =>(:use_item, '💠'))
+
+left_hand_keymap =
+    Dict('w'=>(:move, VI[0, 1]),
+         's'=>(:move, VI[0,-1]),
+         'a'=>(:move, VI[-1,0]),
+         'd'=>(:move, VI[1, 0]),
+         '1'=>(:use_item, '💣'),
+         '2'=>(:use_item, '💠'))
+
+function create_player(game, icon, playernum, keymap)
+    board_centre = game.board_size .÷ 2
+
+    items = Items(game.ledger)
+    for i=1:5
+        push!(items, Entity(game.ledger, SpriteComp('💣', 2)))
+    end
+
+    Entity(game.ledger,
+        SpatialComp(board_centre, VI[0,0]),
+        PlayerControlComp(keymap),
+        InventoryComp(items),
+        PlayerInfoComp(icon, playernum),
+        SpriteComp(icon, 1000),
+        CollisionComp(1),
+        ExplosiveReactionComp(:die),
+    )
+end
+
 function init_game(term)
     game = Gameoji(term)
 
@@ -675,52 +723,8 @@ function init_game(term)
 
     make_vault(game.board_size, background_chars, game.ledger)
 
-    # Set up players
-    # Right hand keyboard controls
-    right_hand_keymap =
-         Dict(ARROW_UP   =>(:move, VI[0, 1]),
-              ARROW_DOWN =>(:move, VI[0,-1]),
-              ARROW_LEFT =>(:move, VI[-1,0]),
-              ARROW_RIGHT=>(:move, VI[1, 0]),
-              '0'        =>(:use_item, '💣'),
-              '9'        =>(:use_item, '💠'))
-
-    board_centre = game.board_size .÷ 2
-
-    function init_inventory(ledger)
-        items = Items(ledger)
-        for i=1:5
-            push!(items, Entity(game.ledger, SpriteComp('💣', 2)))
-        end
-        items
-    end
-    Entity(game.ledger,
-        SpatialComp(board_centre, VI[0,0]),
-        PlayerControlComp(right_hand_keymap),
-        InventoryComp(init_inventory(game.ledger)),
-        PlayerInfoComp('👦', 1),
-        SpriteComp('👦', 1000),
-        CollisionComp(1),
-        ExplosiveReactionComp(:die),
-    )
-
-    left_hand_keymap =
-         Dict('w'=>(:move, VI[0, 1]),
-              's'=>(:move, VI[0,-1]),
-              'a'=>(:move, VI[-1,0]),
-              'd'=>(:move, VI[1, 0]),
-              '1'=>(:use_item, '💣'),
-              '2'=>(:use_item, '💠'))
-
-    Entity(game.ledger,
-        SpatialComp(board_centre, VI[0,0]),
-        PlayerControlComp(left_hand_keymap),
-        InventoryComp(init_inventory(game.ledger)),
-        PlayerInfoComp('👧', 2),
-        SpriteComp('👧', 1000),
-        CollisionComp(1),
-        ExplosiveReactionComp(:die),
-    )
+    create_player(game, '👦', 1, right_hand_keymap)
+    create_player(game, '👧', 2, left_hand_keymap)
 
     #=
     # Dog random walkers
@@ -810,7 +814,6 @@ function init_game(term)
     game
 end
 
-include("terminal.jl")
 include("maze_levels.jl")
 
 # Global game object for use with RemoteREPL
