@@ -12,6 +12,9 @@ using REPL
 using Logging
 import StatsBase
 
+using RemoteREPL
+using Sockets
+
 const Vec2I = SVector{2,Int}
 const VI = SA{Int}
 
@@ -810,31 +813,42 @@ end
 include("terminal.jl")
 include("maze_levels.jl")
 
+# Global game object for use with RemoteREPL
+game = nothing
+
 function main()
     term = TerminalMenus.terminal
     open("log.txt", "w") do logio
         with_logger(ConsoleLogger(logio)) do
-            rawmode(term) do
-                in_stream = term.in_stream
-                clear_screen(stdout)
-                # TODO: Try async read from stdin & timed game loop?
-                while true
-                    game = init_game(term)
+            @sync begin
+                server = listen(Sockets.localhost, 27754)
+                @async begin
+                    # Allow live modifications
+                    serve_repl(server)
+                end
+                rawmode(term) do
+                    clear_screen(stdout)
+                    # TODO: Try async read from stdin & timed game loop?
                     while true
-                        update(game)
-                        flush(logio) # Hack!
-                        key = read_key()
-                        if key == CTRL_C
-                            # Clear
-                            clear_screen(stdout)
-                            return
-                        elseif key == CTRL_R
-                            clear_screen(stdout)
-                            break
+                        # invokelatest for use with Revise.jl
+                        global game = Base.invokelatest(init_game, term)
+                        while true
+                            Base.invokelatest(update, game)
+                            flush(logio) # Hack!
+                            key = read_key()
+                            if key == CTRL_C
+                                # Clear
+                                clear_screen(stdout)
+                                return
+                            elseif key == CTRL_R
+                                clear_screen(stdout)
+                                break
+                            end
+                            game.input_key = key
                         end
-                        game.input_key = key
                     end
                 end
+                close(server)
             end
         end
     end
