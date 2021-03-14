@@ -216,7 +216,9 @@ function Overseer.update(::BoidVelocityUpdate, m::AbstractLedger)
         θ = 2*π*rand()
         rand_vel = SA[cos(θ), sin(θ)]
         cohesion_vel = mean_pos - pos
-        norm(cohesion_vel) != 0 && (cohesion_vel = normalize(cohesion_vel))
+        if norm(cohesion_vel) != 0
+            cohesion_vel = normalize(cohesion_vel)
+        end
         vel = 0.2*cohesion_vel + 0.3*sep_vel + mean_vel + 0.5*rand_vel
         spatial[e] = SpatialComp(pos, clamp.(round.(Int, vel), -1, 1))
 	end
