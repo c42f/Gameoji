@@ -598,15 +598,8 @@ function string_to_layout(str)
     reverse(hcat([[r; fill(' ', maxlen-length(r))] for r in rows]...), dims=2)
 end
 
-function make_vault(board_size, background_chars, ledger)
-    layout = string_to_layout("""
-          ⬛⬛⬛⬛⬛⬛
-        ⬛............⬛
-        ⬛............⬛
-        ⬛............⬛
-        ⬛............⬛
-        ⬛............⬛
-          ⬛⬛🚪⬛⬛⬛  """)
+function overlay_board(func, board_size, background_chars, ledger, layout_str)
+    layout = string_to_layout(layout_str)
 
     sz = size(layout)
 
@@ -616,7 +609,6 @@ function make_vault(board_size, background_chars, ledger)
     to_delete = Set{Vec2I}()
     new_entities = Set{Entity}()
 
-    treasure = "💠💰💎"
     for i = 1:size(layout,1)
         for j = 1:size(layout,2)
             c = layout[i,j]
@@ -627,23 +619,11 @@ function make_vault(board_size, background_chars, ledger)
             background_chars[pos...] = c
             push!(to_delete, pos)
             spatialcomp = SpatialComp(pos, VI[0,0])
-            if c == '.'
-                e = Entity(ledger, spatialcomp,
-                       SpriteComp(rand(treasure), 2),
-                       CollectibleComp()
-                      )
-            elseif c == '⬛'
-                e = Entity(ledger, spatialcomp,
-                       SpriteComp(c, 0),
-                       CollisionComp(100),
-                       ExplosiveReactionComp(:none),
-                      )
-            else
-                e = Entity(ledger, spatialcomp,
-                       SpriteComp(c, 0),
-                      )
+            e = func(spatialcomp, c)
+            @info "Deleting" e
+            if !isnothing(e)
+                push!(new_entities, e)
             end
-            push!(new_entities, e)
         end
     end
 
@@ -654,6 +634,37 @@ function make_vault(board_size, background_chars, ledger)
         end
     end
     delete_scheduled!(ledger)
+end
+
+function make_vault(game, background)
+    layout = """
+          ⬛⬛⬛⬛⬛⬛
+        ⬛............⬛
+        ⬛............⬛
+        ⬛............⬛
+        ⬛............⬛
+        ⬛............⬛
+          ⬛⬛🚪⬛⬛⬛  """
+
+    overlay_board(game.board_size, background, game.ledger, layout) do pos, c
+        treasure = "💠💰💎"
+        if c == '.'
+            Entity(game.ledger, pos,
+                   SpriteComp(rand(treasure), 2),
+                   CollectibleComp()
+                  )
+        elseif c == '⬛'
+            Entity(game.ledger, pos,
+                   SpriteComp(c, 0),
+                   CollisionComp(100),
+                   ExplosiveReactionComp(:none),
+                  )
+        else
+            Entity(game.ledger, pos,
+                   SpriteComp(c, 0),
+                  )
+        end
+    end
 end
 
 function reconstruct_background(game)
@@ -694,7 +705,7 @@ function create_player(game, icon, playernum, keymap)
         push!(items, Entity(game.ledger, SpriteComp('💣', 2)))
     end
 
-    Entity(game.ledger,
+    e = Entity(game.ledger,
         SpatialComp(board_centre, VI[0,0]),
         PlayerControlComp(keymap),
         InventoryComp(items),
@@ -703,6 +714,7 @@ function create_player(game, icon, playernum, keymap)
         CollisionComp(1),
         ExplosiveReactionComp(:die),
     )
+    @info "Created player" e
 end
 
 function init_game(term)
@@ -723,7 +735,7 @@ function init_game(term)
         end
     end
 
-    make_vault(game.board_size, background_chars, game.ledger)
+    make_vault(game, background_chars)
 
     create_player(game, '👦', 1, right_hand_keymap)
     create_player(game, '👧', 2, left_hand_keymap)
@@ -832,29 +844,32 @@ function main()
                     # Allow live modifications
                     serve_repl(server)
                 end
-                rawmode(term) do
-                    clear_screen(stdout)
-                    # TODO: Try async read from stdin & timed game loop?
-                    while true
-                        # invokelatest for use with Revise.jl
-                        global game = Base.invokelatest(init_game, term)
+                try
+                    rawmode(term) do
+                        clear_screen(stdout)
+                        # TODO: Try async read from stdin & timed game loop?
                         while true
-                            Base.invokelatest(update, game)
-                            flush(logio) # Hack!
-                            key = read_key()
-                            if key == CTRL_C
-                                # Clear
-                                clear_screen(stdout)
-                                return
-                            elseif key == CTRL_R
-                                clear_screen(stdout)
-                                break
+                            # invokelatest for use with Revise.jl
+                            global game = Base.invokelatest(init_game, term)
+                            while true
+                                Base.invokelatest(update, game)
+                                flush(logio) # Hack!
+                                key = read_key()
+                                if key == CTRL_C
+                                    # Clear
+                                    clear_screen(stdout)
+                                    return
+                                elseif key == CTRL_R
+                                    clear_screen(stdout)
+                                    break
+                                end
+                                game.input_key = key
                             end
-                            game.input_key = key
                         end
                     end
+                finally
+                    close(server)
                 end
-                close(server)
             end
         end
     end
