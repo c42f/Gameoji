@@ -750,6 +750,7 @@ function init_game(term)
                    BoidControlComp(),
                    SpriteComp('🐔', 10),
                    CollisionComp(1),
+                   CollectibleComp()
                   )
     end
 
