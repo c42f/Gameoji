@@ -91,6 +91,8 @@ end
 @component struct CollectibleComp
 end
 
+@component struct NewLevelTriggerComp
+end
 
 #-------------------------------------------------------------------------------
 # Systems
@@ -433,6 +435,41 @@ function Overseer.update(::InventoryCollectionUpdate, m::AbstractLedger)
     delete!(spatial, to_delete)
 end
 
+# Game events
+struct NewLevelUpdate <: System end
+
+Overseer.requested_components(::NewLevelUpdate) = (PlayerInfoComp,SpatialComp,NewLevelTriggerComp)
+
+function Overseer.update(::NewLevelUpdate, m::AbstractLedger)
+    spatial = m[SpatialComp]
+    player_info = m[PlayerInfoComp]
+    new_level = m[NewLevelTriggerComp]
+
+    new_level_triggers = Set([spatial[e].position
+                              for e in @entities_in(spatial && new_level)])
+    new_level = false
+    for player in @entities_in(spatial && player_info)
+        if spatial[player].position in new_level_triggers
+            # Recreate
+            new_level = true
+            break
+        end
+    end
+    if new_level
+        # Remove players from the board, delete everything with a position,
+        # recreate the board, and place the players in it.
+        for player in @entities_in(player_info)
+            pop!(spatial,player)
+        end
+        for e in @entities_in(spatial)
+            schedule_delete!(m, e)
+        end
+        delete_scheduled!(m)
+        init_board(m)
+        position_players(m)
+    end
+end
+
 # Graphics & Rendering
 
 struct AnimatedSpriteUpdate <: System end
@@ -513,10 +550,11 @@ function Gameoji(term)
     ledger = Ledger(
         Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerControlUpdate()]),
         Stage(:dynamics, [PositionUpdate()]),
+        Stage(:dynamics_post, [TimerUpdate()]),
         Stage(:lifetime, [InventoryCollectionUpdate(), LifetimeUpdate(),
                           TimedExplosion(), ExplosionDamageUpdate(), EntityKillUpdate()]),
+        Stage(:new_level, [NewLevelUpdate()]),
         Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
-        Stage(:dynamics_post, [TimerUpdate()]),
     )
     Gameoji(term, '\0', board_size, ledger)
 end
@@ -619,10 +657,11 @@ function overlay_board(func, board_size, background_chars, ledger, layout_str)
             background_chars[pos...] = c
             push!(to_delete, pos)
             spatialcomp = SpatialComp(pos, VI[0,0])
-            e = func(spatialcomp, c)
-            @info "Deleting" e
-            if !isnothing(e)
-                push!(new_entities, e)
+            if c != 'x'
+                e = func(spatialcomp, c)
+                if !isnothing(e)
+                    push!(new_entities, e)
+                end
             end
         end
     end
@@ -667,6 +706,34 @@ function make_vault(game, background)
     end
 end
 
+function make_exit(game, background)
+    layout = """
+        ⬛⬛⬛⬛
+        🚪🌀🌀⬛
+        ⬛🌀🌀⬛
+        ⬛⬛⬛⬛"""
+
+    overlay_board(game.board_size, background, game.ledger, layout) do pos, c
+        treasure = "💠💰💎"
+        if c == '⬛'
+            Entity(game.ledger, pos,
+                   SpriteComp(c, 0),
+                   CollisionComp(100),
+                   ExplosiveReactionComp(:none),
+                  )
+        elseif c == '🌀'
+            Entity(game.ledger, pos,
+                   SpriteComp(c, 0),
+                   NewLevelTriggerComp(),
+                  )
+        else
+            Entity(game.ledger, pos,
+                   SpriteComp(c, 0),
+                  )
+        end
+    end
+end
+
 function reconstruct_background(game)
     background = fill(' ', game.board_size...)
     collision = game.ledger[CollisionComp]
@@ -698,15 +765,12 @@ left_hand_keymap =
          '2'=>(:use_item, '💠'))
 
 function create_player(game, icon, playernum, keymap)
-    board_centre = game.board_size .÷ 2
-
     items = Items(game.ledger)
     for i=1:5
         push!(items, Entity(game.ledger, SpriteComp('💣', 2)))
     end
 
     e = Entity(game.ledger,
-        SpatialComp(board_centre, VI[0,0]),
         PlayerControlComp(keymap),
         InventoryComp(items),
         PlayerInfoComp(icon, playernum),
@@ -717,9 +781,29 @@ function create_player(game, icon, playernum, keymap)
     @info "Created player" e
 end
 
+function position_players(game)
+	spatial = game.ledger[SpatialComp]
+    player_info = game.ledger[PlayerInfoComp]
+
+    board_centre = game.board_size .÷ 2
+    for player in @entities_in(player_info)
+        spatial[player] = SpatialComp(board_centre, VI[0,0])
+    end
+end
+
 function init_game(term)
     game = Gameoji(term)
 
+    create_player(game, '👦', 1, right_hand_keymap)
+    create_player(game, '👧', 2, left_hand_keymap)
+    init_board(game)
+
+    position_players(game)
+
+    return game
+end
+
+function init_board(game)
     background_chars = generate_maze(tuple(game.board_size...))
 
     # Convert maze board into entities
@@ -736,9 +820,7 @@ function init_game(term)
     end
 
     make_vault(game, background_chars)
-
-    create_player(game, '👦', 1, right_hand_keymap)
-    create_player(game, '👧', 2, left_hand_keymap)
+    make_exit(game, background_chars)
 
     #=
     # Dog random walkers
