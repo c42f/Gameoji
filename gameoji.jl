@@ -440,10 +440,10 @@ struct NewLevelUpdate <: System end
 
 Overseer.requested_components(::NewLevelUpdate) = (PlayerInfoComp,SpatialComp,NewLevelTriggerComp)
 
-function Overseer.update(::NewLevelUpdate, m::AbstractLedger)
-    spatial = m[SpatialComp]
-    player_info = m[PlayerInfoComp]
-    new_level = m[NewLevelTriggerComp]
+function Overseer.update(::NewLevelUpdate, game::AbstractLedger)
+    spatial = game[SpatialComp]
+    player_info = game[PlayerInfoComp]
+    new_level = game[NewLevelTriggerComp]
 
     new_level_triggers = Set([spatial[e].position
                               for e in @entities_in(spatial && new_level)])
@@ -462,11 +462,11 @@ function Overseer.update(::NewLevelUpdate, m::AbstractLedger)
             pop!(spatial,player)
         end
         for e in @entities_in(spatial)
-            schedule_delete!(m, e)
+            schedule_delete!(game, e)
         end
-        delete_scheduled!(m)
-        init_board(m)
-        position_players(m)
+        delete_scheduled!(game)
+        new_level!(game)
+        position_players(game)
     end
 end
 
@@ -542,6 +542,7 @@ mutable struct Gameoji <: AbstractLedger
     input_key
     board_size::Vec2I
     ledger::Ledger
+    level_num::Int
 end
 
 function Gameoji(term)
@@ -556,7 +557,7 @@ function Gameoji(term)
         Stage(:new_level, [NewLevelUpdate()]),
         Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
     )
-    Gameoji(term, '\0', board_size, ledger)
+    Gameoji(term, '\0', board_size, ledger, 0)
 end
 
 function Base.show(io::IO, game::Gameoji)
@@ -796,14 +797,16 @@ function init_game(term)
 
     create_player(game, '👦', 1, right_hand_keymap)
     create_player(game, '👧', 2, left_hand_keymap)
-    init_board(game)
+    new_level!(game)
 
     position_players(game)
 
     return game
 end
 
-function init_board(game)
+function new_level!(game)
+    game.level_num += 1
+
     background_chars = generate_maze(tuple(game.board_size...))
 
     # Convert maze board into entities
@@ -850,20 +853,20 @@ function init_board(game)
 
     # Collectibles
     fruits = collect("🍉🍌🍏🍐🍑🍒🍓")
-    for _=1:200
+    for _=1:10
         seed_rand!(game.ledger, background_chars,
                    CollectibleComp(),
                    SpriteComp(rand(fruits), 2))
     end
     treasure = collect("💰💎")
-    for _=1:20
+    for _=1:10
         seed_rand!(game.ledger, background_chars,
                    CollectibleComp(),
                    SpriteComp(rand(treasure), 2))
     end
 
     # Health packs
-    for _=1:10
+    for _=1:2
         seed_rand!(game.ledger, background_chars,
                    CollectibleComp(),
                    SpriteComp('💠', 2))
@@ -873,7 +876,7 @@ function init_board(game)
     for _=1:5
         seed_rand!(game.ledger, background_chars,
                    RandomVelocityControlComp(),
-                   EntityKillerComp(),
+                   #EntityKillerComp(),
                    CollisionComp(1),
                    SpriteComp(rand(monsters), 2))
     end
