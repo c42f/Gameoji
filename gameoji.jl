@@ -765,7 +765,7 @@ function create_player(game, icon, playernum, keymap)
         push!(items, Entity(game.ledger, SpriteComp('💣', 2)))
     end
 
-    e = Entity(game.ledger,
+    Entity(game.ledger,
         PlayerControlComp(keymap),
         InventoryComp(items),
         PlayerInfoComp(icon, playernum),
@@ -773,7 +773,6 @@ function create_player(game, icon, playernum, keymap)
         CollisionComp(1),
         ExplosiveReactionComp(:die),
     )
-    @info "Created player" e
 end
 
 function position_players(game)

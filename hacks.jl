@@ -164,3 +164,13 @@ girl  = find_player(game, 2)
 
 @info "Player Characters" boy girl
 
+function rand_position_players(game)
+	spatial = game.ledger[SpatialComp]
+    player_info = game.ledger[PlayerInfoComp]
+
+    for player in @entities_in(player_info)
+        p = VI[rand(1:game.board_size[1]), rand(1:game.board_size[2])]
+        spatial[player] = SpatialComp(p, VI[0,0])
+    end
+end
+
