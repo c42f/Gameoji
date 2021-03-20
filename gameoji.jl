@@ -511,23 +511,17 @@ function Overseer.update(::TerminalRenderer, m::AbstractLedger)
     # Collect and render inventories
     inventory = m[InventoryComp]
     player_info = m[PlayerInfoComp]
-    left_sidebar = fill("", m.board_size[2])
-    right_sidebar = fill("", m.board_size[2])
+    left_sidebar = []
+    right_sidebar = []
     for e in @entities_in(inventory && player_info)
-        if player_info[e].number == 1
-            sidebar = right_sidebar
-        elseif player_info[e].number == 2
-            sidebar = left_sidebar
-        else
-            continue
-        end
-        item_counts = StatsBase.countmap([sprite_comp[i].icon for i in inventory[e].items])
-        for (j,(item,count)) in enumerate(item_counts)
-            if j > length(sidebar)
-                break
-            end
-            sidebar[end+1-j] = "$(item)$(lpad(count,3))"
-        end
+        sidebar = player_info[e].number == 1 ? right_sidebar :
+                  player_info[e].number == 2 ? left_sidebar  :
+                  continue
+        push!(sidebar, " $(player_info[e].base_icon)")
+        push!(sidebar, "─────")
+        item_counts = StatsBase.countmap([sprite_comp[i].icon
+                                          for i in inventory[e].items])
+        append!(sidebar, sort(item_counts))
     end
     # Render
     print(m.term, "\e[1;1H") # Home position
@@ -924,10 +918,15 @@ function main()
     open("log.txt", "w") do logio
         with_logger(ConsoleLogger(logio)) do
             @sync begin
-                server = listen(Sockets.localhost, 27754)
-                @async begin
-                    # Allow live modifications
-                    serve_repl(server)
+                local server = nothing
+                try
+                    server = listen(Sockets.localhost, 27754)
+                    @async begin
+                        # Allow live modifications
+                        serve_repl(server)
+                    end
+                catch
+                    nothing
                 end
                 try
                     rawmode(term) do
@@ -953,7 +952,7 @@ function main()
                         end
                     end
                 finally
-                    close(server)
+                    isnothing(server) || close(server)
                 end
             end
         end

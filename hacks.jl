@@ -50,13 +50,14 @@ function spawn_pineapples(game, number)
     end
 end
 
-function spawn_plants(game, number)
-    plants = collect("🌲🌳🌱🌴🌵🌴🌳🌿🍀🍁🍂🍄")
+plant_emojis = collect("🌲🌳🌱🌴🌵🌴🌳🌿🍀🍁🍂🍄")
+
+function spawn_collectibles(game, emojis, number)
     background = reconstruct_background(game)
     for _=1:number
         seed_rand!(game.ledger, background,
                    CollectibleComp(),
-                   SpriteComp(rand(plants), 2),
+                   SpriteComp(rand(emojis), 2),
                    )
     end
 end

@@ -56,16 +56,32 @@ function clear_screen(io)
               #homepos   #clear
 end
 
+format_sidebar_line(line::AbstractChar) = format_sidebar_line(string(line))
+function format_sidebar_line(line::AbstractString)
+    pad_sidebar(line, sidebar_width-1)
+end
+function format_sidebar_line((item,count)::Pair)
+    format_sidebar_line("$(pad_emoji_string(item, true))$(lpad(count,3))")
+end
+format_sidebar_line(::Nothing) = format_sidebar_line("")
+
+function format_sidebar(height, content)
+    content = copy(content)
+    append!(content, fill(nothing, max(height-length(content), 0)))
+    formatted = format_sidebar_line.(content)
+end
+
 function printboard(io, board, left_sidebar=nothing, right_sidebar=nothing)
     for i=size(board,2):-1:1
+        j = size(board,2)-i+1
         if !isnothing(left_sidebar)
-            lc = pad_sidebar(left_sidebar[i], sidebar_width-1)
-            print(io, pad_emoji_string(lc, false), '│')
+            x = j <= length(left_sidebar) ? left_sidebar[j] : nothing
+            print(io, format_sidebar_line(x), '│')
         end
         print(io, pad_emoji_string(board[:,i], true))
         if !isnothing(right_sidebar)
-            rc = pad_sidebar(right_sidebar[i], sidebar_width-1)
-            print(io, '│', pad_emoji_string(rc, false))
+            x = j <= length(right_sidebar) ? right_sidebar[j] : nothing
+            print(io, '│', format_sidebar_line(x))
         end
         i != 1 && println(io)
     end
