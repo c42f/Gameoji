@@ -756,6 +756,10 @@ left_hand_keymap =
          's'=>(:move, VI[0,-1]),
          'a'=>(:move, VI[-1,0]),
          'd'=>(:move, VI[1, 0]),
+         'W'=>(:move, VI[0, 1]), # ignore capslock
+         'S'=>(:move, VI[0,-1]),
+         'A'=>(:move, VI[-1,0]),
+         'D'=>(:move, VI[1, 0]),
          '1'=>(:use_item, '💣'),
          '2'=>(:use_item, '💠'))
 
