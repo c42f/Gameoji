@@ -870,7 +870,7 @@ function new_level!(game)
     end
 
     monsters = collect("👺👹")
-    for _=1:5
+    for _=1:5*game.level_num
         seed_rand!(game.ledger, background_chars,
                    RandomVelocityControlComp(),
                    #EntityKillerComp(),
