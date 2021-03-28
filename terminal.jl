@@ -51,6 +51,10 @@ end
 
 const sidebar_width = 6
 
+function home_pos(io)
+    print(io, "\e[1;1H")
+end
+
 function clear_screen(io)
     print(io, "\e[1;1H", "\e[J")
               #homepos   #clear

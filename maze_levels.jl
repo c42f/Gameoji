@@ -13,7 +13,7 @@ rot90m(d) = -rot90p(d)
 
 """
 Observe local environment relative to coordinate frame defined by position
-`pos` and direction `d`.
+`pos` and direction `d`. The standard non-rotated orientation is when d == [1,0].
 """
 function observe_env(board, pos, d, fill_val)
     env = fill(fill_val, MMatrix{5,5,eltype(board)})
@@ -43,51 +43,78 @@ function softmax(xs)
     e ./ sum(e)
 end
 
-function perceptron(coeffs, temperature, d, environment)
-    action_weights = (coeffs * vec(environment)) ./ temperature
+function perceptron(coeffs, temperature, d, env)
+    traversable = env .== ' '
+    action_weights = (coeffs * vec(traversable)) ./ temperature
     action_probs = softmax(action_weights)
     action = findfirst(rand() .< cumsum(action_probs))
     #action = argmax(action_probs)
     new_d = (d, rot90p(d), rot90m(d))[action]
+    (new_d, true)
 end
 
-function generate_maze(boardsize)
+function wall_avoiding_perceptron(coeffs, temperature, d, env)
+    traversable = env .== ' '
+    action_weights = (coeffs * vec(traversable)) ./ temperature
+    action_probs = softmax(action_weights)
+    action = findfirst(rand() .< cumsum(action_probs))
+    vs = (VI[1,0], VI[0,1], VI[0,-1])
+    # Try various actions to avoid a wall
+    for a in (action, 1, 2, 3, 4)
+        if a == 4
+            return (VI[0,0], false)
+        end
+        new_p = VI[3,3] + vs[a]
+        if env[new_p...] ∈ (' ',brick,'\0')
+            action = a
+            break
+        end
+    end
+    new_d = (d, rot90p(d), rot90m(d))[action]
+    return (new_d, true)
+end
+
+function generate_maze!(board)
     @load "perceptrons_1.jld2" perceptrons
     quality_dist = Categorical(normalize(first.(perceptrons), 1))
-    board = fill(' ', boardsize)
     coeffs = last(perceptrons[rand(quality_dist)])
     #coeffs = randn(3,25)
-    run_walkers(board, (d, env)->perceptron(coeffs, 1.0, d, env))
+    run_walkers(board, (d, env)->wall_avoiding_perceptron(coeffs, 1.0, d, env))
     return board
 end
 
 function run_walkers(board, choose_direction)
     while sum(==(' '), board) > 0.6*length(board)
-        # Choose initial position, not surrounded by bricks
+        # Choose initial position, surrounded by spaces
         pos = VI[0,0]
         while true
             pos = VI[rand(2:size(board,1)-1), rand(2:size(board,2)-1)]
-            if  board[pos...]             != brick  &&
-                board[(pos .+ (-1,0))...] != brick  &&
-                board[(pos .+ ( 1,0))...] != brick  &&
-                board[(pos .+ (0,-1))...] != brick  &&
-                board[(pos .+ (0, 1))...] != brick
+            if  board[pos...]             == ' '  &&
+                board[(pos .+ (-1,0))...] == ' '  &&
+                board[(pos .+ ( 1,0))...] == ' '  &&
+                board[(pos .+ (0,-1))...] == ' '  &&
+                board[(pos .+ (0, 1))...] == ' '
                 break
             end
         end
         d = rand((VI[1,0], VI[-1,0], VI[0,1], VI[0,-1]))
-        c = brick
         for i=1:100
             env = observe_env(board, pos, d, Char(0))
-            traversable = env .== ' '
-            d = choose_direction(d, traversable)
+            (d, continue_walk) = choose_direction(d, env)
+            if !continue_walk
+                break
+            end
             pos += d
             if !in_board(board, pos)
                 break
             end
-            board[pos...] = c
-            # clear_screen(stdout)
-            # printboard(stdout, board)
+            board[pos...] = brick
+            #=
+            if i % 50 == 1
+                home_pos(stdout)
+                printboard(stdout, board)
+            end
+            =#
             # print(stdout, Crayon(background=:blue))
             # println(stdout)
             # println(stdout, "-----")

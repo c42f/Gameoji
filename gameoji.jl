@@ -456,17 +456,7 @@ function Overseer.update(::NewLevelUpdate, game::AbstractLedger)
         end
     end
     if new_level
-        # Remove players from the board, delete everything with a position,
-        # recreate the board, and place the players in it.
-        for player in @entities_in(player_info)
-            pop!(spatial,player)
-        end
-        for e in @entities_in(spatial)
-            schedule_delete!(game, e)
-        end
-        delete_scheduled!(game)
         new_level!(game)
-        position_players(game)
     end
 end
 
@@ -624,20 +614,43 @@ monsters = collect("👻👺👹👽🧟")
 =#
 
 function string_to_layout(str)
-    # Remove every second ascii char
-    ascii_despace(s) = [c for (i,c) in enumerate(s) if !isascii(c) || iseven(i)]
+    function ascii_despace(s)
+        # Remove every second ascii char to make variable spacing work
+        cs = Char[]
+        prev_ascii = false
+        for c in s
+            if prev_ascii
+                prev_ascii = false
+            else
+                push!(cs, c)
+                prev_ascii = isascii(c)
+            end
+        end
+        cs
+    end
     rows = ascii_despace.(split(str, '\n'))
     maxlen = maximum(length.(rows))
     reverse(hcat([[r; fill(' ', maxlen-length(r))] for r in rows]...), dims=2)
 end
 
-function overlay_board(func, board_size, background_chars, ledger, layout_str)
+function overlay_board(func, board_size, background_chars, ledger, layout_str;
+                       start = nothing)
     layout = string_to_layout(layout_str)
 
     sz = size(layout)
 
-    start = VI[rand(2:(board_size[1] - sz[1] - 1)),
-               rand(2:(board_size[2] - sz[2] - 1))]
+    if isnothing(start)
+        while true
+            start = VI[rand(2:(board_size[1] - sz[1] - 2)),
+                       rand(2:(board_size[2] - sz[2] - 2))]
+            # Environment, buffered by 1 char
+            to_replace = background_chars[start[1] .+ (-1:sz[1]),
+                                          start[2] .+ (-1:sz[2])]
+            if all(to_replace .== ' ')
+                break
+            end
+        end
+    end
 
     to_delete = Set{Vec2I}()
     new_entities = Set{Entity}()
@@ -648,7 +661,7 @@ function overlay_board(func, board_size, background_chars, ledger, layout_str)
             if c == ' '
                 continue
             end
-            pos = start + VI[i,j]
+            pos = start - VI[1,1] + VI[i,j]
             background_chars[pos...] = c
             push!(to_delete, pos)
             spatialcomp = SpatialComp(pos, VI[0,0])
@@ -670,7 +683,7 @@ function overlay_board(func, board_size, background_chars, ledger, layout_str)
     delete_scheduled!(ledger)
 end
 
-function make_vault(game, background)
+function make_vault!(game, background)
     layout = """
           ⬛⬛⬛⬛⬛⬛
         ⬛............⬛
@@ -701,7 +714,7 @@ function make_vault(game, background)
     end
 end
 
-function make_exit(game, background)
+function make_exit!(game, background)
     layout = """
         ⬛⬛⬛⬛
         🚪🌀🌀⬛
@@ -709,7 +722,6 @@ function make_exit(game, background)
         ⬛⬛⬛⬛"""
 
     overlay_board(game.board_size, background, game.ledger, layout) do pos, c
-        treasure = "💠💰💎"
         if c == '⬛'
             Entity(game.ledger, pos,
                    SpriteComp(c, 0),
@@ -727,6 +739,43 @@ function make_exit(game, background)
                   )
         end
     end
+end
+
+function make_entry!(game, background)
+    layout = """
+        ⬛⬛⬛⬛
+        x . . ⬛
+        x x x 🚪
+        x x x 🚪
+        x . . ⬛
+        ⬛⬛⬛⬛"""
+
+    start_pos_mid = VI[1, game.board_size[2] ÷ 2]
+    start_pos = start_pos_mid - VI[0,3]
+
+    overlay_board(game.board_size, background, game.ledger, layout;
+                  start=start_pos) do pos, c
+        treasure = ('💣', '💠')
+        if c == '.'
+            Entity(game.ledger, pos,
+                   SpriteComp(rand(treasure), 2),
+                   CollectibleComp()
+                  )
+        elseif c == '⬛'
+            Entity(game.ledger, pos,
+                   SpriteComp(c, 0),
+                   CollisionComp(100),
+                   ExplosiveReactionComp(:none),
+                  )
+        elseif c in '🚪'
+            Entity(game.ledger, pos,
+                   SpriteComp(c, 0),
+                  )
+        else
+        end
+    end
+
+    Dict(1=>start_pos_mid, 2=>start_pos_mid + VI[0,1])
 end
 
 function reconstruct_background(game)
@@ -779,13 +828,13 @@ function create_player(game, icon, playernum, keymap)
     )
 end
 
-function position_players(game)
+function position_players!(new_position::Function, game)
 	spatial = game.ledger[SpatialComp]
     player_info = game.ledger[PlayerInfoComp]
 
-    board_centre = game.board_size .÷ 2
     for player in @entities_in(player_info)
-        spatial[player] = SpatialComp(board_centre, VI[0,0])
+        pos = new_position(player_info[player].number)
+        spatial[player] = SpatialComp(pos, VI[0,0])
     end
 end
 
@@ -794,9 +843,8 @@ function init_game(term)
 
     create_player(game, '👦', 1, right_hand_keymap)
     create_player(game, '👧', 2, left_hand_keymap)
-    new_level!(game)
 
-    position_players(game)
+    new_level!(game)
 
     return game
 end
@@ -804,13 +852,33 @@ end
 function new_level!(game)
     game.level_num += 1
 
-    background_chars = generate_maze(tuple(game.board_size...))
+    # Remove players from the board; delete everything with a position
+    let
+        spatial = game[SpatialComp]
+        player_info = game[PlayerInfoComp]
+        for player in @entities_in(player_info && spatial)
+            pop!(spatial,player)
+        end
+        for e in @entities_in(spatial)
+            schedule_delete!(game, e)
+        end
+        delete_scheduled!(game)
+    end
+
+    # Recreate the board, and place the players in it.
+    background_chars = fill(' ', game.board_size...)
+
+    new_player_pos = make_entry!(game, background_chars)
+    make_vault!(game, background_chars)
+    make_exit!(game, background_chars)
+
+    generate_maze!(background_chars)
 
     # Convert maze board into entities
     for i in 1:game.board_size[1]
         for j in 1:game.board_size[2]
             c = background_chars[i,j]
-            if c != ' '
+            if c == brick
                 Entity(game.ledger,
                        SpriteComp(c, 0),
                        SpatialComp(VI[i,j], VI[0,0]),
@@ -818,9 +886,6 @@ function new_level!(game)
             end
         end
     end
-
-    make_vault(game, background_chars)
-    make_exit(game, background_chars)
 
     #=
     # Dog random walkers
@@ -870,10 +935,10 @@ function new_level!(game)
     end
 
     monsters = collect("👺👹")
-    for _=1:5*game.level_num
+    for _=1:4*(game.level_num-1)
         seed_rand!(game.ledger, background_chars,
                    RandomVelocityControlComp(),
-                   #EntityKillerComp(),
+                   EntityKillerComp(),
                    CollisionComp(1),
                    SpriteComp(rand(monsters), 2))
     end
@@ -902,10 +967,14 @@ function new_level!(game)
     # Bomb concentrations!
     for _=1:2
         flood_fill!(game.ledger, background_chars, rand_unoccupied_pos(background_chars),
-                    length(background_chars)÷20,
+                    length(background_chars) ÷ 20,
                     SpriteComp('💣', 1),
                     ExplosiveReactionComp(:explode),
                     CollectibleComp())
+    end
+
+    position_players!(game) do player_num
+        new_player_pos[player_num]
     end
 
     game
@@ -960,4 +1029,17 @@ function main()
             end
         end
     end
+end
+
+function test_level()
+    term = TerminalMenus.terminal
+    game = Gameoji(term)
+
+    background_chars = fill(' ', reverse(displaysize(stdout)) .÷ (2,1))
+
+    make_entry!(game, background_chars)
+    make_vault!(game, background_chars)
+    make_exit!(game, background_chars)
+
+    generate_maze!(background_chars)
 end
