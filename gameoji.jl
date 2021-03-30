@@ -104,6 +104,9 @@ struct TimerUpdate <: System end
 Overseer.requested_components(::TimerUpdate) = (TimerComp,)
 
 function Overseer.update(::TimerUpdate, m::AbstractLedger)
+    if m.input_key != nothing
+        return # Hack: input events don't cause timer updates
+    end
 	timer = m[TimerComp]
     for e in @entities_in(timer)
         timer[e] = TimerComp(timer[e].time + 1)
@@ -997,20 +1000,21 @@ function main()
                         # Allow live modifications
                         serve_repl(server)
                     end
-                catch
-                    nothing
+                catch exc
+                    @error "Failed to set up REPL server" exception=(exc,catch_backtrace())
                 end
+                event_channel = Channel()
                 try
                     rawmode(term) do
                         clear_screen(stdout)
                         # TODO: Try async read from stdin & timed game loop?
-                        while true
+                        @async while true
                             # invokelatest for use with Revise.jl
                             global game = Base.invokelatest(init_game, term)
-                            while true
+                            while isopen(event_channel)
                                 Base.invokelatest(update, game)
                                 flush(logio) # Hack!
-                                key = read_key()
+                                key = take!(event_channel)
                                 if key == CTRL_C
                                     # Clear
                                     clear_screen(stdout)
@@ -1022,8 +1026,31 @@ function main()
                                 game.input_key = key
                             end
                         end
+                        frame_timer = Timer(0; interval=0.2)
+                        @async while true
+                            # Frame timer events
+                            wait(frame_timer)
+                            isopen(event_channel) || break
+                            push!(event_channel, nothing)
+                        end
+                        # It appears we need to wait on stdin in the original
+                        # task, otherwise we miss events (??)
+                        try
+                            while true
+                                key = read_key()
+                                push!(event_channel, key)
+                                if key == CTRL_C
+                                    break
+                                end
+                            end
+                        catch exc
+                            @error "Adding key failed" exception=(exc,catch_backtrace())
+                        finally
+                            close(event_channel)
+                        end
                     end
                 finally
+                    close(event_channel)
                     isnothing(server) || close(server)
                 end
             end
