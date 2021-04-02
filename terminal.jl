@@ -1,8 +1,52 @@
 using REPL.TerminalMenus
 
-using REPL.TerminalMenus: ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT
-const CTRL_C = Char(3)
-const CTRL_R = '\x12'
+#--------------------------------------------------
+# Utilities
+function rawmode(f, term)
+    REPL.Terminals.raw!(term, true)
+    try
+        print(term.out_stream, "\x1b[?25l") # hide the cursor
+        f()
+    finally
+        print(term.out_stream, "\x1b[?25h") # unhide cursor
+        REPL.Terminals.raw!(term, false)
+    end
+end
+
+#--------------------------------------------------
+# Keyboard input
+
+struct Key
+    keyboard::UInt32  # Id for the connected keyboard (may be remote)
+    keycode::UInt32
+end
+
+# Import TerminalMenus.Key codes, but converted to UInt32 constants so that all
+# keys can be of the same type (the numerical values of these don't represent
+# unicode code points)
+for k in (:ARROW_UP, :ARROW_DOWN, :ARROW_LEFT, :ARROW_RIGHT, :DEL_KEY,
+          :HOME_KEY, :END_KEY, :PAGE_UP, :PAGE_DOWN)
+    @eval const $k = UInt32(REPL.TerminalMenus.$k)
+end
+
+# Some additional keys constants represented as type Char
+const CTRL_C = 0x3
+const CTRL_R = 0x12
+
+# Read a UInt32 terminal key code
+function read_key(io=stdin)
+    keycode = REPL.TerminalMenus.readkey(io)
+    c = Char(keycode)
+    # Ignore caps lock - make case-insensitive
+    return isascii(c) && isletter(c) ? UInt32(lowercase(c)) : keycode
+end
+
+function make_keymap(keyboard_id, mapping_pairs)
+    Dict(Key(keyboard_id, UInt32(k))=>v for (k,v) in mapping_pairs)
+end
+
+#--------------------------------------------------
+# Terminal output / emoji rendering
 
 # Some emoji chars for which textwidth is incorrect (??)
 const brick = '🧱'
@@ -88,28 +132,6 @@ function printboard(io, board, left_sidebar=nothing, right_sidebar=nothing)
             print(io, '│', format_sidebar_line(x))
         end
         i != 1 && println(io)
-    end
-end
-
-function rawmode(f, term)
-    REPL.Terminals.raw!(term, true)
-    try
-        print(term.out_stream, "\x1b[?25l") # hide the cursor
-        f()
-    finally
-        print(term.out_stream, "\x1b[?25h") # unhide cursor
-        REPL.Terminals.raw!(term, false)
-    end
-end
-
-function read_key(io=stdin)
-    k = REPL.TerminalMenus.readkey(io)
-    if k in Int.((ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT))
-        return REPL.TerminalMenus.Key(k)
-    elseif k == 3
-        return CTRL_C
-    else
-        return Char(k)
     end
 end
 

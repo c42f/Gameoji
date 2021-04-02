@@ -526,7 +526,8 @@ end
 
 mutable struct Gameoji <: AbstractLedger
     term
-    input_key
+    next_keyboard_id::Int
+    input_key::Union{Key,Nothing}
     board_size::Vec2I
     ledger::Ledger
     level_num::Int
@@ -535,7 +536,11 @@ end
 function Gameoji(term)
     h,w = displaysize(stdout)
     board_size = VI[(w-2*sidebar_width)÷2, h]
-    ledger = Ledger(
+    Gameoji(term, 1, nothing, board_size, gameoji_ledger(), 0)
+end
+
+function gameoji_ledger()
+    Ledger(
         Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerControlUpdate()]),
         Stage(:dynamics, [PositionUpdate()]),
         Stage(:dynamics_post, [TimerUpdate()]),
@@ -544,7 +549,13 @@ function Gameoji(term)
         Stage(:new_level, [NewLevelUpdate()]),
         Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
     )
-    Gameoji(term, '\0', board_size, ledger, 0)
+end
+
+function reset!(game::Gameoji)
+    empty!(entities(game))
+    game.input_key = nothing
+    game.ledger = gameoji_ledger()
+    game.level_num = 0
 end
 
 function Base.show(io::IO, game::Gameoji)
@@ -795,25 +806,22 @@ function reconstruct_background(game)
     background
 end
 
-right_hand_keymap =
-    Dict(ARROW_UP   =>(:move, VI[0, 1]),
-         ARROW_DOWN =>(:move, VI[0,-1]),
-         ARROW_LEFT =>(:move, VI[-1,0]),
-         ARROW_RIGHT=>(:move, VI[1, 0]),
-         '0'        =>(:use_item, '💣'),
-         '9'        =>(:use_item, '💠'))
+# Keys. May be bound to a keyboard using make_keymap()
+right_hand_keys = Dict(
+    ARROW_UP   =>(:move, VI[0, 1]),
+    ARROW_DOWN =>(:move, VI[0,-1]),
+    ARROW_LEFT =>(:move, VI[-1,0]),
+    ARROW_RIGHT=>(:move, VI[1, 0]),
+    '0'        =>(:use_item, '💣'),
+    '9'        =>(:use_item, '💠'))
 
-left_hand_keymap =
-    Dict('w'=>(:move, VI[0, 1]),
-         's'=>(:move, VI[0,-1]),
-         'a'=>(:move, VI[-1,0]),
-         'd'=>(:move, VI[1, 0]),
-         'W'=>(:move, VI[0, 1]), # ignore capslock
-         'S'=>(:move, VI[0,-1]),
-         'A'=>(:move, VI[-1,0]),
-         'D'=>(:move, VI[1, 0]),
-         '1'=>(:use_item, '💣'),
-         '2'=>(:use_item, '💠'))
+left_hand_keys = Dict(
+    'w'=>(:move, VI[0, 1]),
+    's'=>(:move, VI[0,-1]),
+    'a'=>(:move, VI[-1,0]),
+    'd'=>(:move, VI[1, 0]),
+    '1'=>(:use_item, '💣'),
+    '2'=>(:use_item, '💠'))
 
 function create_player(game, icon, playernum, keymap)
     items = Items(game.ledger)
@@ -841,15 +849,10 @@ function position_players!(new_position::Function, game)
     end
 end
 
-function init_game(term)
-    game = Gameoji(term)
-
-    create_player(game, '👦', 1, right_hand_keymap)
-    create_player(game, '👧', 2, left_hand_keymap)
-
-    new_level!(game)
-
-    return game
+function add_keyboard(game)
+    id = game.next_keyboard_id
+    game.next_keyboard_id += 1
+    return id
 end
 
 function new_level!(game)
@@ -993,53 +996,72 @@ function main()
     open("log.txt", "w") do logio
         with_logger(ConsoleLogger(logio)) do
             @sync begin
-                local server = nothing
+                repl_server = nothing
                 try
-                    server = listen(Sockets.localhost, 27754)
+                    repl_server = listen(Sockets.localhost, 27754)
                     @async begin
                         # Allow live modifications
-                        serve_repl(server)
+                        serve_repl(repl_server)
                     end
                 catch exc
                     @error "Failed to set up REPL server" exception=(exc,catch_backtrace())
                 end
-                event_channel = Channel()
+                global game = Gameoji(term)
+                main_keyboard_id = add_keyboard(game)
+                global event_channel = Channel()
+                @info "Initialized game"
                 try
                     rawmode(term) do
                         clear_screen(stdout)
                         # TODO: Try async read from stdin & timed game loop?
-                        @async while true
-                            # invokelatest for use with Revise.jl
-                            global game = Base.invokelatest(init_game, term)
+                        @async try while true
+                            reset!(game)
+                            create_player(game, '👦', 1,
+                                          make_keymap(main_keyboard_id, right_hand_keys))
+                            create_player(game, '👧', 2,
+                                          make_keymap(main_keyboard_id, left_hand_keys))
+                            new_level!(game)
                             while isopen(event_channel)
                                 Base.invokelatest(update, game)
                                 flush(logio) # Hack!
-                                key = take!(event_channel)
-                                if key == CTRL_C
-                                    # Clear
-                                    clear_screen(stdout)
-                                    return
-                                elseif key == CTRL_R
-                                    clear_screen(stdout)
-                                    break
+                                (type,value) = take!(event_channel)
+                                @debug "Read event" type value
+                                if type === :key
+                                    key = value
+                                    if key.keycode == CTRL_C
+                                        # Clear
+                                        clear_screen(stdout)
+                                        return
+                                    elseif key.keycode == CTRL_R
+                                        clear_screen(stdout)
+                                        break
+                                    end
+                                    game.input_key = key
+                                else
+                                    game.input_key = nothing
                                 end
-                                game.input_key = key
                             end
+                        end
+                        catch exc
+                            @error "Game event loop failed" exception=(exc,catch_backtrace())
+                            close(event_channel)
                         end
                         frame_timer = Timer(0; interval=0.2)
                         @async while true
                             # Frame timer events
                             wait(frame_timer)
                             isopen(event_channel) || break
-                            push!(event_channel, nothing)
+                            push!(event_channel, (:timer,nothing))
                         end
                         # It appears we need to wait on stdin in the original
                         # task, otherwise we miss events (??)
                         try
                             while true
-                                key = read_key()
-                                push!(event_channel, key)
-                                if key == CTRL_C
+                                keycode = read_key(stdin)
+                                key = Key(main_keyboard_id, keycode)
+                                @debug "Read key" key Char(key.keycode)
+                                push!(event_channel, (:key, key))
+                                if keycode == CTRL_C
                                     break
                                 end
                             end
@@ -1051,14 +1073,14 @@ function main()
                     end
                 finally
                     close(event_channel)
-                    isnothing(server) || close(server)
+                    isnothing(repl_server) || close(repl_server)
                 end
             end
         end
     end
 end
 
-function test_level()
+function test_level_gen()
     term = TerminalMenus.terminal
     game = Gameoji(term)
 
