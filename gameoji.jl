@@ -61,7 +61,7 @@ InventoryComp() = InventoryComp(Items())
 
 @component struct PlayerInfoComp
     base_icon::Char
-    number::Int
+    screen_number::Int # Screen they're connected to
 end
 
 @component struct PlayerControlComp
@@ -504,21 +504,22 @@ function Overseer.update(::TerminalRenderer, m::AbstractLedger)
     # Collect and render inventories
     inventory = m[InventoryComp]
     player_info = m[PlayerInfoComp]
-    left_sidebar = []
-    right_sidebar = []
+    sidebars = []
     for e in @entities_in(inventory && player_info)
-        sidebar = player_info[e].number == 1 ? right_sidebar :
-                  player_info[e].number == 2 ? left_sidebar  :
-                  continue
+        if player_info[e].screen_number != 1
+            continue
+        end
+        sidebar = []
         push!(sidebar, " $(player_info[e].base_icon)")
         push!(sidebar, "─────")
         item_counts = StatsBase.countmap([sprite_comp[i].icon
                                           for i in inventory[e].items])
         append!(sidebar, sort(item_counts))
+        push!(sidebars, sidebar)
     end
     # Render
     print(m.term, "\e[1;1H") # Home position
-    print(m.term, sprint(printboard, board, left_sidebar, right_sidebar))
+    print(m.term, sprint(printboard, board, sidebars...))
 end
 
 #-------------------------------------------------------------------------------
@@ -530,13 +531,15 @@ mutable struct Gameoji <: AbstractLedger
     input_key::Union{Key,Nothing}
     board_size::Vec2I
     ledger::Ledger
+    start_positions
     level_num::Int
+    joined_players::Vector
 end
 
 function Gameoji(term)
     h,w = displaysize(stdout)
     board_size = VI[(w-2*sidebar_width)÷2, h]
-    Gameoji(term, 1, nothing, board_size, gameoji_ledger(), 0)
+    Gameoji(term, 1, nothing, board_size, gameoji_ledger(), [VI[1,1]], 0, [])
 end
 
 function gameoji_ledger()
@@ -556,6 +559,9 @@ function reset!(game::Gameoji)
     game.input_key = nothing
     game.ledger = gameoji_ledger()
     game.level_num = 0
+    for (screen_number,icon,keymap) in game.joined_players
+        create_player!(game, screen_number, icon, keymap)
+    end
 end
 
 function Base.show(io::IO, game::Gameoji)
@@ -789,7 +795,11 @@ function make_entry!(game, background)
         end
     end
 
-    Dict(1=>start_pos_mid, 2=>start_pos_mid + VI[0,1])
+    start_positions = Vec2I[]
+    for i=0:1, j=0:1
+        push!(start_positions, start_pos_mid + VI[i,j])
+    end
+    game.start_positions = start_positions
 end
 
 function reconstruct_background(game)
@@ -823,7 +833,13 @@ left_hand_keys = Dict(
     '1'=>(:use_item, '💣'),
     '2'=>(:use_item, '💠'))
 
-function create_player(game, icon, playernum, keymap)
+function join_player!(game, screen_number, icon, keymap)
+    push!(game.joined_players, (screen_number, icon, keymap))
+    player = create_player!(game, screen_number, icon, keymap)
+    position_players!(game, [player])
+end
+
+function create_player!(game, screen_number, icon, keymap)
     items = Items(game.ledger)
     for i=1:5
         push!(items, Entity(game.ledger, SpriteComp('💣', 2)))
@@ -832,21 +848,24 @@ function create_player(game, icon, playernum, keymap)
     Entity(game.ledger,
         PlayerControlComp(keymap),
         InventoryComp(items),
-        PlayerInfoComp(icon, playernum),
+        PlayerInfoComp(icon, screen_number),
         SpriteComp(icon, 1000),
         CollisionComp(1),
         ExplosiveReactionComp(:die),
     )
 end
 
-function position_players!(new_position::Function, game)
+function position_players!(game, players)
 	spatial = game.ledger[SpatialComp]
-    player_info = game.ledger[PlayerInfoComp]
-
-    for player in @entities_in(player_info)
-        pos = new_position(player_info[player].number)
+    for (i,player) in enumerate(players)
+        pos = game.start_positions[mod1(i, length(game.start_positions))]
         spatial[player] = SpatialComp(pos, VI[0,0])
     end
+end
+
+function position_players!(game)
+    player_info = game.ledger[PlayerInfoComp]
+    position_players!(game, @entities_in(player_info))
 end
 
 function add_keyboard(game)
@@ -874,7 +893,7 @@ function new_level!(game)
     # Recreate the board, and place the players in it.
     background_chars = fill(' ', game.board_size...)
 
-    new_player_pos = make_entry!(game, background_chars)
+    make_entry!(game, background_chars)
     make_vault!(game, background_chars)
     make_exit!(game, background_chars)
 
@@ -979,14 +998,13 @@ function new_level!(game)
                     CollectibleComp())
     end
 
-    position_players!(game) do player_num
-        new_player_pos[player_num]
-    end
+    position_players!(game)
 
     game
 end
 
 include("maze_levels.jl")
+include("client_server.jl")
 
 # Global game object for use with RemoteREPL
 game = nothing
@@ -996,6 +1014,7 @@ function main()
     open("log.txt", "w") do logio
         with_logger(ConsoleLogger(logio)) do
             @sync begin
+                game_server = nothing
                 repl_server = nothing
                 try
                     repl_server = listen(Sockets.localhost, 27754)
@@ -1008,18 +1027,26 @@ function main()
                 end
                 global game = Gameoji(term)
                 main_keyboard_id = add_keyboard(game)
-                global event_channel = Channel()
+                join_player!(game, 1, '👧',
+                             make_keymap(main_keyboard_id, left_hand_keys))
+                join_player!(game, 1, '👦',
+                             make_keymap(main_keyboard_id, right_hand_keys))
+                event_channel = Channel()
+                try
+                    game_server = listen(Sockets.localhost, default_port)
+                    @async begin
+                        # Allow live modifications
+                        serve_game(game_server, event_channel, game)
+                    end
+                catch exc
+                    @error "Failed to set up Gameoji server" exception=(exc,catch_backtrace())
+                end
                 @info "Initialized game"
                 try
                     rawmode(term) do
                         clear_screen(stdout)
-                        # TODO: Try async read from stdin & timed game loop?
                         @async try while true
                             reset!(game)
-                            create_player(game, '👦', 1,
-                                          make_keymap(main_keyboard_id, right_hand_keys))
-                            create_player(game, '👧', 2,
-                                          make_keymap(main_keyboard_id, left_hand_keys))
                             new_level!(game)
                             while isopen(event_channel)
                                 Base.invokelatest(update, game)
@@ -1074,6 +1101,7 @@ function main()
                 finally
                     close(event_channel)
                     isnothing(repl_server) || close(repl_server)
+                    isnothing(game_server) || close(game_server)
                 end
             end
         end
