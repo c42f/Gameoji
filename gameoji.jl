@@ -1,6 +1,6 @@
 #!/bin/bash
 #=
-exec julia --project=. -e 'include(popfirst!(ARGS)); main()' \
+exec julia --project=. -e 'include(popfirst!(ARGS)); if (length(ARGS) >= 1 && ARGS[1] == "remote") ; run_game_client() else main() end' \
     "${BASH_SOURCE[0]}" "$@"
 =#
 
