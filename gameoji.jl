@@ -107,10 +107,10 @@ function Overseer.update(::TimerUpdate, m::AbstractLedger)
     if m.input_key != nothing
         return # Hack: input events don't cause timer updates
     end
-	timer = m[TimerComp]
+    timer = m[TimerComp]
     for e in @entities_in(timer)
         timer[e] = TimerComp(timer[e].time + 1)
-	end
+    end
 end
 
 # Position update
@@ -120,7 +120,7 @@ struct PositionUpdate <: System end
 Overseer.requested_components(::PositionUpdate) = (SpatialComp,CollisionComp)
 
 function Overseer.update(::PositionUpdate, m::AbstractLedger)
-	spatial = m[SpatialComp]
+    spatial = m[SpatialComp]
     collision = m[CollisionComp]
 
     collidables = collect(@entities_in(spatial && collision))
@@ -237,8 +237,8 @@ struct TimedExplosion <: System end
 Overseer.requested_components(::TimedExplosion) = (SpatialComp,TimerComp,ExplosionComp,ExplosionDamageComp)
 
 function Overseer.update(::TimedExplosion, m::AbstractLedger)
-	spatial = m[SpatialComp]
-	timer = m[TimerComp]
+    spatial = m[SpatialComp]
+    timer = m[TimerComp]
     explosion = m[ExplosionComp]
     damage = m[ExplosionDamageComp]
     for e in @entities_in(spatial && timer && explosion)
@@ -261,7 +261,7 @@ function Overseer.update(::TimedExplosion, m::AbstractLedger)
                 schedule_delete!(m, e)
             end
         end
-	end
+    end
     delete_scheduled!(m)
 end
 
@@ -271,13 +271,13 @@ struct LifetimeUpdate <: System end
 Overseer.requested_components(::LifetimeUpdate) = (TimerComp,LifetimeComp)
 
 function Overseer.update(::LifetimeUpdate, m::AbstractLedger)
-	timer = m[TimerComp]
+    timer = m[TimerComp]
     lifetime = m[LifetimeComp]
     for e in @entities_in(timer && lifetime)
         if timer[e].time > lifetime[e].max_age
             schedule_delete!(m, e)
         end
-	end
+    end
     delete_scheduled!(m)
 end
 
@@ -288,7 +288,7 @@ struct EntityKillUpdate <: System end
 Overseer.requested_components(::EntityKillUpdate) = (SpatialComp,EntityKillerComp)
 
 function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
-	spatial = m[SpatialComp]
+    spatial = m[SpatialComp]
     killer_tag = m[EntityKillerComp]
     killer_positions = Set{Vec2I}()
     for e in @entities_in(spatial && killer_tag)
@@ -299,7 +299,7 @@ function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
         if !(e in killer_tag) && (spatial[e].position in killer_positions)
             schedule_delete!(m, e)
         end
-	end
+    end
     delete_scheduled!(m)
 end
 
@@ -309,7 +309,7 @@ struct ExplosionDamageUpdate <: System end
 Overseer.requested_components(::ExplosionDamageUpdate) = (SpatialComp,ExplosionDamageComp,ExplosiveReactionComp)
 
 function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
-	spatial = m[SpatialComp]
+    spatial = m[SpatialComp]
     exp_damage = m[ExplosionDamageComp]
     explosion_positions = Set{Vec2I}()
     for e in @entities_in(spatial && exp_damage)
@@ -343,7 +343,7 @@ function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
                 error("Unrecognized explosion reaction property $r")
             end
         end
-	end
+    end
     delete_scheduled!(m)
 end
 
@@ -355,8 +355,8 @@ struct PlayerControlUpdate <: System end
 Overseer.requested_components(::PlayerControlUpdate) = (SpatialComp, PlayerControlComp, SpriteComp, InventoryComp, PlayerInfoComp)
 
 function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
-	spatial = m[SpatialComp]
-	controls = m[PlayerControlComp]
+    spatial = m[SpatialComp]
+    controls = m[PlayerControlComp]
     sprite = m[SpriteComp]
     inventory = m[InventoryComp]
     player_info = m[PlayerInfoComp]
@@ -405,7 +405,7 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
             end
         end
         spatial[e] = SpatialComp(position, velocity)
-	end
+    end
 end
 
 # Inventory management
@@ -470,15 +470,15 @@ struct AnimatedSpriteUpdate <: System end
 Overseer.requested_components(::AnimatedSpriteUpdate) = (TimerComp,SpriteComp,AnimatedSpriteComp)
 
 function Overseer.update(::AnimatedSpriteUpdate, m::AbstractLedger)
-	sprite = m[SpriteComp]
-	anim_sprite = m[AnimatedSpriteComp]
+    sprite = m[SpriteComp]
+    anim_sprite = m[AnimatedSpriteComp]
     timer = m[TimerComp]
     for e in @entities_in(sprite && timer && anim_sprite)
         t = timer[e].time
         sprites = anim_sprite[e].icons
         sprite[e] = SpriteComp(sprites[mod1(t,length(sprites))],
                                sprite[e].draw_priority)
-	end
+    end
 end
 
 
@@ -856,7 +856,7 @@ function create_player!(game, screen_number, icon, keymap)
 end
 
 function position_players!(game, players)
-	spatial = game.ledger[SpatialComp]
+    spatial = game.ledger[SpatialComp]
     for (i,player) in enumerate(players)
         pos = game.start_positions[mod1(i, length(game.start_positions))]
         spatial[player] = SpatialComp(pos, VI[0,0])
