@@ -1070,35 +1070,46 @@ function main()
                         @async try while true
                             reset!(game)
                             new_level!(game)
+                            is_paused = false
                             while isopen(event_channel)
-                                Base.invokelatest(update, game)
+                                if !is_paused
+                                    update(game)
+                                end
                                 flush(logio) # Hack!
-                                (type,value) = take!(event_channel)
+                                (event_type,value) = take!(event_channel)
                                 # Terminal rendering is _slow_, so drop frames
                                 # if there's more events in the buffer. This
                                 # reduces latency between keyboard input and
                                 # seeing the results as far as possible.
-                                game.do_render = !isready(event_channel)
-                                @debug "Read event" type value
-                                if type === :key
+                                @debug "Read event" event_type value
+                                if event_type === :key
                                     key = value
                                     if key.keycode == CTRL_C
                                         # Clear
                                         clear_screen(stdout)
                                         return
-                                    elseif key.keycode == CTRL_R
-                                        clear_screen(stdout)
-                                        break
+                                    elseif key.keycode == UInt32('p')
+                                        is_paused = !is_paused
                                     end
-                                    game.input_key = key
-                                else
-                                    game.input_key = nothing
+                                end
+                                if !is_paused
+                                    game.do_render = !isready(event_channel)
+                                    if event_type === :key
+                                        if key.keycode == CTRL_R
+                                            clear_screen(stdout)
+                                            break
+                                        end
+                                        game.input_key = key
+                                    else
+                                        game.input_key = nothing
+                                    end
                                 end
                             end
                         end
                         catch exc
                             @error "Game event loop failed" exception=(exc,catch_backtrace())
                             close(event_channel)
+                            rethrow()
                         end
                         frame_timer = Timer(0; interval=0.2)
                         @async while true
@@ -1121,6 +1132,7 @@ function main()
                             end
                         catch exc
                             @error "Adding key failed" exception=(exc,catch_backtrace())
+                            rethrow()
                         finally
                             close(event_channel)
                         end
