@@ -77,6 +77,8 @@ function serve_game_session(socket, event_channel, game)
                 close(socket)
             end
         end
+    catch exc
+        @error "Error running game session" exception=(exc,catch_backtrace())
     finally
         close(socket)
     end
@@ -88,7 +90,7 @@ function run_game_client(host=Sockets.localhost, port=default_port)
     if magic != protocol_magic
         error("Gameoji protocol magic number mismatch: $(repr(magic)) != $(repr(protocol_magic))")
     end
-    serialize(socket, (:join, '👨'))
+    serialize(socket, (:join, '🧔'))
     rawmode(TerminalMenus.terminal) do
         while true
             keycode = read_key(stdin)

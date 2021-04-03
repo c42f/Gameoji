@@ -160,15 +160,27 @@ struct RandomVelocityUpdate <: System end
 
 Overseer.requested_components(::RandomVelocityUpdate) = (SpatialComp,RandomVelocityControlComp)
 
-function Overseer.update(::RandomVelocityUpdate, m::AbstractLedger)
-	spatial = m[SpatialComp]
-    control = m[RandomVelocityControlComp]
+function zero_velocity_update!(entities)
+    spatial = game[SpatialComp]
+    for e in entities
+        spatial[e] = SpatialComp(spatial[e].position, VI[0,0])
+    end
+    return
+end
+
+function Overseer.update(::RandomVelocityUpdate, game::AbstractLedger)
+    spatial = game[SpatialComp]
+    control = game[RandomVelocityControlComp]
+    if isnothing(game.input_key) # timer update
+        zero_velocity_update!(@entities_in(spatial && control))
+        return
+    end
     velocities = (VI[1,0], VI[0,1], VI[-1,0], VI[0,-1])
     for e in @entities_in(spatial && control)
         s = spatial[e]
         vel = rand(velocities)
         spatial[e] = SpatialComp(s.position, vel)
-	end
+    end
 end
 
 # Boid control of NPCs
@@ -178,11 +190,17 @@ struct BoidVelocityUpdate <: System end
 Overseer.requested_components(::BoidVelocityUpdate) = (SpatialComp,BoidControlComp)
 
 function Overseer.update(::BoidVelocityUpdate, m::AbstractLedger)
-	spatial = m[SpatialComp]
+    spatial = m[SpatialComp]
     control = m[BoidControlComp]
 
     boids = [(e,spatial[e]) for e in @entities_in(spatial && control)]
     length(boids) > 1 || return
+
+    # FIXME: This async zero-velocity update kind of breaks boid dynamics
+    if !isnothing(game.input_key) # timer update
+        zero_velocity_update!(@entities_in(spatial && control))
+        return
+    end
 
     for e in @entities_in(spatial && control)
         pos = spatial[e].position
@@ -226,7 +244,7 @@ function Overseer.update(::BoidVelocityUpdate, m::AbstractLedger)
         end
         vel = 0.2*cohesion_vel + 0.3*sep_vel + mean_vel + 0.5*rand_vel
         spatial[e] = SpatialComp(pos, clamp.(round.(Int, vel), -1, 1))
-	end
+    end
 end
 
 
@@ -487,23 +505,26 @@ struct TerminalRenderer <: System end
 Overseer.requested_components(::TerminalRenderer) = (SpatialComp,SpriteComp,
                                                      InventoryComp,PlayerInfoComp)
 
-function Overseer.update(::TerminalRenderer, m::AbstractLedger)
-	spatial_comp = m[SpatialComp]
-    sprite_comp = m[SpriteComp]
+function Overseer.update(::TerminalRenderer, game::AbstractLedger)
+    if !game.do_render
+        return
+    end
+    spatial_comp = game[SpatialComp]
+    sprite_comp = game[SpriteComp]
     drawables = [(spatial=spatial_comp[e], sprite=sprite_comp[e], id=e.id)
                  for e in @entities_in(spatial_comp && sprite_comp)]
     sort!(drawables, by=obj->(obj.sprite.draw_priority,obj.id))
-    board = fill(' ', m.board_size...)
+    board = fill(' ', game.board_size...)
     # Fill in board
     for obj in drawables
         pos = obj.spatial.position
-        if 1 <= pos[1] <= m.board_size[1] && 1 <= pos[2] <= m.board_size[2]
+        if 1 <= pos[1] <= game.board_size[1] && 1 <= pos[2] <= game.board_size[2]
             board[pos...] = obj.sprite.icon
         end
     end
     # Collect and render inventories
-    inventory = m[InventoryComp]
-    player_info = m[PlayerInfoComp]
+    inventory = game[InventoryComp]
+    player_info = game[PlayerInfoComp]
     sidebars = []
     for e in @entities_in(inventory && player_info)
         if player_info[e].screen_number != 1
@@ -518,8 +539,8 @@ function Overseer.update(::TerminalRenderer, m::AbstractLedger)
         push!(sidebars, sidebar)
     end
     # Render
-    print(m.term, "\e[1;1H") # Home position
-    print(m.term, sprint(printboard, board, sidebars...))
+    print(game.term, "\e[1;1H") # Home position
+    print(game.term, sprint(printboard, board, sidebars...))
 end
 
 #-------------------------------------------------------------------------------
@@ -534,12 +555,13 @@ mutable struct Gameoji <: AbstractLedger
     start_positions
     level_num::Int
     joined_players::Vector
+    do_render::Bool
 end
 
 function Gameoji(term)
     h,w = displaysize(stdout)
     board_size = VI[(w-2*sidebar_width)÷2, h]
-    Gameoji(term, 1, nothing, board_size, gameoji_ledger(), [VI[1,1]], 0, [])
+    Gameoji(term, 1, nothing, board_size, gameoji_ledger(), [VI[1,1]], 0, [], true)
 end
 
 function gameoji_ledger()
@@ -1052,6 +1074,11 @@ function main()
                                 Base.invokelatest(update, game)
                                 flush(logio) # Hack!
                                 (type,value) = take!(event_channel)
+                                # Terminal rendering is _slow_, so drop frames
+                                # if there's more events in the buffer. This
+                                # reduces latency between keyboard input and
+                                # seeing the results as far as possible.
+                                game.do_render = !isready(event_channel)
                                 @debug "Read event" type value
                                 if type === :key
                                     key = value
