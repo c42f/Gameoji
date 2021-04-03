@@ -133,10 +133,10 @@ player_info   = game.ledger[PlayerInfoComp]
 
 player_characters = collect(@entities_in(player_info))
 
-function find_player(game, playernum)
+function find_player(game, base_icon)
     player_info = game.ledger[PlayerInfoComp]
     for player in @entities_in(player_info)
-        if player_info[player].number == playernum
+        if player_info[player].base_icon == base_icon
             return player
         end
     end
@@ -159,8 +159,8 @@ function findall_by_comp(game, comp_type)
     collect(@entities_in(comp))
 end
 
-boy   = find_player(game, 1)
-girl  = find_player(game, 2)
+boy   = find_player(game, '👦')
+girl  = find_player(game, '👧')
 
 @info "Player Characters" boy girl
 
