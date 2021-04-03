@@ -171,7 +171,7 @@ end
 function Overseer.update(::RandomVelocityUpdate, game::AbstractLedger)
     spatial = game[SpatialComp]
     control = game[RandomVelocityControlComp]
-    if isnothing(game.input_key) # timer update
+    if !isnothing(game.input_key) # timer update
         zero_velocity_update!(@entities_in(spatial && control))
         return
     end
