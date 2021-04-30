@@ -1,7 +1,8 @@
 # Gamoji - an emoji-based terminal game in Julia
 
-A little emoji game for my children, Rebecca and Jeremy 😃
+A silly little emoji game for my children 😃
 
+![screenshot](docs/screenshot.png)
 
 ## Installation
 
@@ -42,4 +43,44 @@ levels are randomly generated each time.
 
 The girl and boy emoji both have controls on the same keyboard — WASD and arrow
 keys respectively to move, and `1` and `0` to drop a bomb.
+
+## Live-coding of game rules!
+
+Gameoji starts a REPL server using
+[RemoteREPL.jl](https://github.com/c42f/RemoteREPL.jl), so you can modify the
+game rules while the game is running by connecting with
+`RemoteREPL.connect_repl()`. You may find the hacks in hacks.jl useful for
+this.
+
+Of course, you'll need to understand the internals — in particular a good grasp
+of the Entity-Component-System programming model as implemented in
+[Overseer.jl](https://github.com/louisponet/Overseer.jl).
+
+## In-person multiplayer
+
+Gamoji has rudimentary multiplayer support where multiple devices can be used
+to control characters on a single physical screen. For this, start a normal
+gameoji game on one machine, then ssh into it from a separate machine, start a
+normal Julia REPL there and run `./gameoji.jl remote`. ssh is desirable because
+there's no security in the game protocol.
+
+This will start an event loop which reads keyboard events and allows you to
+participate in the game on the main screen. (Yes, this only allows play when
+everyone is in the same room looking at the single physical screen of the
+server. It's just a fun hack, ok 😃)
+
+## Emoji Troubleshooting
+
+I've found emoji terminal rendering isn't super consistent or reliable between
+terminal emulators.  For example
+
+* `gnome-terminal` on ubuntu 18.04 needs some hacks to correctly render the width
+  of certian emoji characters, including the brick emoji `🧱`. For other
+  terminal emulators, alternative hacks might be needed.
+* After playing this game for some time (perhaps 1/2 an hour) both
+  `gnome-terminal` and `xfce-term` seem to use all system memory! Perhaps this
+  is due to some misconfiguration on my part, or perhaps they have a true
+  memory leak.
+* The style of emoji glyphs in your installed fonts will affect the look of
+  this game a lot.
 
