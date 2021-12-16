@@ -12,7 +12,7 @@ for color and various cursor control.
 
 On Ubuntu 18.04 I've tested it with
 
-* Terminal: `gnome-terminal`
+* Terminal: `gnome-terminal --disable-factory`
 * Emoji font: `fonts-noto-color-emoji`
 
 ```
@@ -69,7 +69,7 @@ participate in the game on the main screen. (Yes, this only allows play when
 everyone is in the same room looking at the single physical screen of the
 server. It's just a fun hack, ok 😃)
 
-## Emoji Troubleshooting
+## Troubleshooting
 
 I've found emoji terminal rendering isn't super consistent or reliable between
 terminal emulators.  For example
@@ -77,10 +77,11 @@ terminal emulators.  For example
 * `gnome-terminal` on ubuntu 18.04 needs some hacks to correctly render the width
   of certian emoji characters, including the brick emoji `🧱`. For other
   terminal emulators, alternative hacks might be needed.
-* After playing this game for some time (perhaps 1/2 an hour) both
-  `gnome-terminal` and `xfce-term` seem to use all system memory! Perhaps this
-  is due to some misconfiguration on my part, or perhaps they have a true
-  memory leak.
 * The style of emoji glyphs in your installed fonts will affect the look of
   this game a lot.
 
+* After playing this game for some time (perhaps 1/2 an hour) both
+  `gnome-terminal` and `xfce-term` seem to use all system memory! Perhaps this
+  is due to some misconfiguration on my part, or perhaps they have a true
+  memory leak.  Use `gnome-terminal --disable-factory` to avoid crashing your
+  other terminal windows!
