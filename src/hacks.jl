@@ -1,11 +1,26 @@
 # Utilities for editing the game with RemoteREPL.jl
 
+plant_emojis = collect("🌲🌳🌱🌴🌵🌴🌳🌿🍀🍁🍂🍄")
+monster_emojis = collect("👺👹")
+junkfood_emojis = collect("🍔🍟🥤🍿🍕")
+
 function find_icons(game, icon)
     es = Entity[]
     sprite = game.ledger[SpriteComp]
     for e in @entities_in(sprite)
         if sprite[e].icon == icon
-            push!(es, e)
+            push!(es, bare_entity(e))
+        end
+    end
+    es
+end
+
+function find_icons(game, icon, component)
+    es = Entity[]
+    sprite = game.ledger[SpriteComp]
+    for e in @entities_in(sprite && component)
+        if sprite[e].icon == icon
+            push!(es, bare_entity(e))
         end
     end
     es
@@ -31,7 +46,11 @@ function reconstruct_background(game)
 end
 
 function spawn_vault(game)
-    make_vault(game.board_size, reconstruct_background(game))
+    make_vault!(game.board_size, reconstruct_background(game))
+end
+
+function spawn_exit(game)
+    make_exit!(game.board_size, reconstruct_background(game))
 end
 
 function spawn_bombs(game, number)
@@ -64,15 +83,21 @@ function spawn_pineapples(game, number)
     end
 end
 
-plant_emojis = collect("🌲🌳🌱🌴🌵🌴🌳🌿🍀🍁🍂🍄")
 
 function spawn_collectibles(game, emojis, number)
     background = reconstruct_background(game)
-    for _=1:number
-        seed_rand!(game.ledger, background,
-                   CollectibleComp(),
-                   SpriteComp(rand(emojis), 2),
-                   )
+    if number > prod(game.board_size)
+        flood_fill!(game.ledger, background, rand_unoccupied_pos(background),
+                    number,
+                    CollectibleComp(),
+                    SpriteComp(rand(emojis), 2))
+    else
+        for _=1:number
+            seed_rand!(game.ledger, background,
+                       CollectibleComp(),
+                       SpriteComp(rand(emojis), 2),
+                       )
+        end
     end
 end
 
@@ -86,19 +111,23 @@ function spawn_bombs(game, number)
                 CollectibleComp())
 end
 
-function spawn_chickens(game, number, components...)
+function spawn_boids(game, number, icon::Char, components...)
     background = reconstruct_background(game)
     for _=1:number
         seed_rand!(game.ledger, background,
                    # SpatialComp(boid_pos, VI[rand(-1:1), rand(-1:1)]),
                    #RandomVelocityControlComp(),
                    BoidControlComp(),
-                   SpriteComp('🐔', 10),
+                   SpriteComp(icon, 10),
                    CollisionComp(1),
                    CollectibleComp(),
                    components...
                   )
     end
+end
+
+function spawn_chickens(game, number, components...)
+    spawn_boids(game, number, '🐔')
 end
 
 function spawn_time_bombs(game, number)
@@ -129,10 +158,15 @@ function spawn_monsters(game, number)
 end
 
 function delete_icons(game, icon)
-    map(find_icons(game, '🐔')) do e
+    map(find_icons(game, icon, game[SpatialComp])) do e
         schedule_delete!(game.ledger, e)
     end
     delete_scheduled!(game.ledger)
+end
+
+function spawn_vault(game)
+    background_chars = fill(' ', reverse(displaysize(stdout)) .÷ (2,1))
+    make_vault!(game, background_chars)
 end
 
 #-------------------------------------------------------------------------------
@@ -162,7 +196,7 @@ function findall_by_comp(f::Function, game, comp_type)
     es = Entity[]
     for e in @entities_in(comp)
         if f(comp[e])
-            push!(es, e)
+            push!(es, bare_entity(e))
         end
     end
     return es
@@ -186,5 +220,16 @@ function rand_position_players(game)
         p = VI[rand(1:game.board_size[1]), rand(1:game.board_size[2])]
         spatial[player] = SpatialComp(p, VI[0,0])
     end
+end
+
+function remove_monsters(game)
+    for m in monster_icons
+        delete_icons(game, m)
+    end
+end
+
+function teleport(game, entity, to_icon)
+    spatial = game.ledger[SpatialComp]
+    spatial[entity] = spatial[rand(find_icons(game, to_icon, spatial))]
 end
 
