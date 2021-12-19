@@ -1049,7 +1049,8 @@ function game_loop(game, event_channel)
             game.is_paused = false
             while isopen(event_channel)
                 if !game.is_paused
-                    update(game)
+                    # Allow live code modification
+                    Base.invokelatest(update, game)
                 end
                 (event_type,value) = take!(event_channel)
                 @debug "Read event" event_type value
