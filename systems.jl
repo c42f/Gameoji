@@ -38,8 +38,11 @@ InventoryComp() = InventoryComp(Items())
 
 @component struct PlayerInfoComp
     base_icon::Char
-    health::Int
     screen_number::Int # Screen they're connected to
+end
+
+@component struct HealthComp
+    health::Int
 end
 
 @component struct PlayerControlComp
@@ -59,7 +62,7 @@ end
 end
 
 @component struct ExplosiveReactionComp
-    type::Symbol # :none :die :explode :disappear (default)
+    type::Symbol # :none :damage :explode :disappear (default)
 end
 
 @component struct LifetimeComp
@@ -318,16 +321,26 @@ function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
     end
     reaction = m[ExplosiveReactionComp]
     sprite = m[SpriteComp]
+    player_info = m[PlayerInfoComp]
+    health = m[HealthComp]
     for e in @entities_in(spatial && !exp_damage)
         pos = spatial[e].position
         if pos in explosion_positions
             r = e in reaction ? reaction[e].type : :disappear
-            # :none :die :explode :disappear (default)
             if r === :disappear
                 schedule_delete!(m, e)
-            elseif r === :die
-                # TODO: Set movement disabled property?
-                sprite[e] = SpriteComp('💀', sprite[e].draw_priority)
+            elseif r === :damage
+                # FIXME: Set movement disabled property?
+                is_dead = true
+                if e in health
+                    # things which have health loose one health
+                    h = health[e].health - 1
+                    health[e] = HealthComp(h)
+                    is_dead = h <= 0
+                end
+                if is_dead
+                    sprite[e] = SpriteComp('💀', sprite[e].draw_priority)
+                end
             elseif r === :explode
                 for i=-1:1, j=-1:1
                     Entity(m, SpatialComp(pos + VI[i,j], VI[0,0]),
@@ -510,19 +523,17 @@ function Overseer.update(::TerminalRenderer, game::AbstractLedger)
         end
     end
     # Collect and render inventories
-    inventory = game[InventoryComp]
-    player_info = game[PlayerInfoComp]
     sidebars = []
-    for e in @entities_in(inventory && player_info)
-        if player_info[e].screen_number != 1
+    for e in @entities_in(game, InventoryComp && PlayerInfoComp && HealthComp)
+        if e.screen_number != 1
             continue
         end
         sidebar = []
-        push!(sidebar, " $(player_info[e].base_icon)")
-        push!(sidebar, '💖'=>player_info[e].health)
+        push!(sidebar, " $(e.base_icon)")
+        push!(sidebar, '💖'=>e.health)
         push!(sidebar, "─────")
         item_counts = StatsBase.countmap([sprite_comp[i].icon
-                                          for i in inventory[e].items])
+                                          for i in e.items])
         append!(sidebar, sort(item_counts))
         push!(sidebars, sidebar)
     end
