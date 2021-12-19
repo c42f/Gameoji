@@ -303,8 +303,11 @@ function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
     end
     for e in @entities_in(spatial)
         if !(e in killer_tag) && (spatial[e].position in killer_positions)
-            if e in health && health[e]
-                health[e] = HealthComp(health[e].health - 1)
+            if e in health
+                h = health[e].health
+                if h > 0
+                    health[e] = HealthComp(h - 1)
+                end
             else
                 schedule_delete!(m, e)
             end
