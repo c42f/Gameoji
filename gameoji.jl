@@ -63,6 +63,7 @@ InventoryComp() = InventoryComp(Items())
 
 @component struct PlayerInfoComp
     base_icon::Char
+    health::Int
     screen_number::Int # Screen they're connected to
 end
 
@@ -534,6 +535,7 @@ function Overseer.update(::TerminalRenderer, game::AbstractLedger)
         end
         sidebar = []
         push!(sidebar, " $(player_info[e].base_icon)")
+        push!(sidebar, repeat('💖', player_info[e].health))
         push!(sidebar, "─────")
         item_counts = StatsBase.countmap([sprite_comp[i].icon
                                           for i in inventory[e].items])
@@ -878,7 +880,7 @@ function create_player!(game, screen_number, icon, keymap)
     Entity(game.ledger,
         PlayerControlComp(keymap),
         InventoryComp(items),
-        PlayerInfoComp(icon, screen_number),
+        PlayerInfoComp(icon, 5, screen_number),
         SpriteComp(icon, 1000),
         CollisionComp(1),
         ExplosiveReactionComp(:die),
