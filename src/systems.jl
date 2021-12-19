@@ -295,13 +295,19 @@ function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
     spatial = m[SpatialComp]
     killer_tag = m[EntityKillerComp]
     killer_positions = Set{Vec2I}()
+    health = m[HealthComp]
+    sprite = m[SpriteComp]
     for e in @entities_in(spatial && killer_tag)
         pos = spatial[e].position
         push!(killer_positions, pos)
     end
     for e in @entities_in(spatial)
         if !(e in killer_tag) && (spatial[e].position in killer_positions)
-            schedule_delete!(m, e)
+            if e in health && health[e]
+                health[e] = HealthComp(health[e].health - 1)
+            else
+                schedule_delete!(m, e)
+            end
         end
     end
     delete_scheduled!(m)
@@ -331,15 +337,10 @@ function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
                 schedule_delete!(m, e)
             elseif r === :damage
                 # FIXME: Set movement disabled property?
-                is_dead = true
                 if e in health
                     # things which have health loose one health
                     h = health[e].health - 1
                     health[e] = HealthComp(h)
-                    is_dead = h <= 0
-                end
-                if is_dead
-                    sprite[e] = SpriteComp('💀', sprite[e].draw_priority)
                 end
             elseif r === :explode
                 for i=-1:1, j=-1:1
@@ -373,17 +374,17 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
     spatial = m[SpatialComp]
     controls = m[PlayerControlComp]
     sprite = m[SpriteComp]
+    health = m[HealthComp]
     inventory = m[InventoryComp]
     player_info = m[PlayerInfoComp]
-    for e in @entities_in(spatial && controls && sprite && inventory)
-        if sprite[e].icon == '💀'
-            # Player is dead.
-            # TODO: Might want to use something other than the icon for this
-            # state machine!
-            continue
-        end
+    for e in @entities_in(spatial && controls && sprite && inventory && health)
         position = spatial[e].position
         velocity = VI[0,0]
+        if health[e].health <= 0
+            # Player is dead and can't move!
+            spatial[e] = SpatialComp(position, velocity)
+            continue
+        end
         action,value = get(controls[e].keymap, m.input_key, (:none,nothing))
         if action === :move
             velocity = value
@@ -432,20 +433,29 @@ Overseer.requested_components(::InventoryCollectionUpdate) = (InventoryComp,Spat
 
 function Overseer.update(::InventoryCollectionUpdate, m::AbstractLedger)
     inventory = m[InventoryComp]
+    health = m[HealthComp]
     spatial = m[SpatialComp]
     sprite = m[SpriteComp]
     collectible = m[CollectibleComp]
 
-    collectors = [(pos=spatial[e].position, items=inventory[e].items)
+    collectors = [(e=bare_entity(e), pos=spatial[e].position, items=inventory[e].items)
                   for e in @entities_in(inventory && spatial)]
 
     to_delete = Entity[]
     for e in @entities_in(spatial && collectible && sprite)
         pos = spatial[e].position
         for collector in collectors
+            if collector.e == bare_entity(e)
+                # Entities can't collect themselves!
+                continue
+            end
             if pos == collector.pos
+                if e in health && collector.e in health
+                    # Transfer health
+                    health[collector.e] = HealthComp(health[collector.e].health + health[e].health)
+                    health[e] = HealthComp(0)
+                end
                 push!(collector.items, bare_entity(e))
-                # When it's in an inventory, simply delete the spatial component
                 push!(to_delete, bare_entity(e))
                 break
             end
@@ -511,15 +521,19 @@ function Overseer.update(::TerminalRenderer, game::AbstractLedger)
     end
     spatial_comp = game[SpatialComp]
     sprite_comp = game[SpriteComp]
-    drawables = [(spatial=spatial_comp[e], sprite=sprite_comp[e], id=e.id)
+    health = game[HealthComp]
+    drawables = [(spatial=spatial_comp[e],
+                  sprite=sprite_comp[e],
+                  is_dead=(e in health) ? health[e].health <= 0 : false,
+                  id=e.id)
                  for e in @entities_in(spatial_comp && sprite_comp)]
-    sort!(drawables, by=obj->(obj.sprite.draw_priority,obj.id))
+    sort!(drawables, by=obj->(obj.sprite.draw_priority, obj.id))
     board = fill(' ', game.board_size...)
     # Fill in board
     for obj in drawables
         pos = obj.spatial.position
         if 1 <= pos[1] <= game.board_size[1] && 1 <= pos[2] <= game.board_size[2]
-            board[pos...] = obj.sprite.icon
+            board[pos...] = obj.is_dead ? '💀' : obj.sprite.icon
         end
     end
     # Collect and render inventories

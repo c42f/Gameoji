@@ -81,49 +81,45 @@ include("client_server.jl")
 # The main game update loop
 function game_loop(game, event_channel)
     clear_screen(stdout)
-    try
-        while true
+    while true
+        Base.invokelatest() do
             reset!(game)
             new_level!(game)
-            game.is_paused = false
-            while isopen(event_channel)
-                if !game.is_paused
-                    # Allow live code modification
-                    Base.invokelatest(update, game)
+        end
+        game.is_paused = false
+        while isopen(event_channel)
+            if !game.is_paused
+                # Allow live code modification
+                Base.invokelatest(update, game)
+            end
+            (event_type,value) = take!(event_channel)
+            @debug "Read event" event_type value
+            if event_type === :key
+                key = value
+                if key.keycode == CTRL_C
+                    # Clear
+                    clear_screen(stdout)
+                    return
+                elseif key.keycode == UInt32('p')
+                    game.is_paused = !game.is_paused
                 end
-                (event_type,value) = take!(event_channel)
-                @debug "Read event" event_type value
+            end
+            if !game.is_paused
+                # Terminal rendering is _slow_, so drop frames if there's
+                # more events in the buffer. This reduces latency between
+                # keyboard input and seeing the results.
+                game.do_render = !isready(event_channel)
                 if event_type === :key
-                    key = value
-                    if key.keycode == CTRL_C
-                        # Clear
+                    if key.keycode == CTRL_R
                         clear_screen(stdout)
-                        return
-                    elseif key.keycode == UInt32('p')
-                        game.is_paused = !game.is_paused
+                        break
                     end
-                end
-                if !game.is_paused
-                    # Terminal rendering is _slow_, so drop frames if there's
-                    # more events in the buffer. This reduces latency between
-                    # keyboard input and seeing the results.
-                    game.do_render = !isready(event_channel)
-                    if event_type === :key
-                        if key.keycode == CTRL_R
-                            clear_screen(stdout)
-                            break
-                        end
-                        game.input_key = key
-                    else
-                        game.input_key = nothing
-                    end
+                    game.input_key = key
+                else
+                    game.input_key = nothing
                 end
             end
         end
-    catch exc
-        @error "Game event loop failed" exception=(exc,catch_backtrace())
-        close(event_channel)
-        rethrow()
     end
 end
 
@@ -159,7 +155,14 @@ function main()
                 try
                     rawmode(term) do
                         # Main game loop
-                        @async game_loop(game, event_channel)
+                        @async try
+                            game_loop(game, event_channel)
+                        catch exc
+                            @error "Game event loop failed" exception=(exc,catch_backtrace())
+                            close(event_channel)
+                            # Close stdin to terminate wait on keyboard input
+                            close(stdin)
+                        end
 
                         # Frame timer events
                         @async try

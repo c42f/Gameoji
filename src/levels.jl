@@ -317,6 +317,12 @@ function new_level!(game)
                    CollectibleComp(),
                    SpriteComp('💠', 2))
     end
+    for _=1:5
+        seed_rand!(game.ledger, background_chars,
+                   CollectibleComp(),
+                   HealthComp(2),
+                   SpriteComp('💖', 3))
+    end
 
     monsters = collect("👺👹")
     for _=1:(game.level_num-1)
@@ -324,7 +330,7 @@ function new_level!(game)
                    RandomVelocityControlComp(),
                    EntityKillerComp(),
                    CollisionComp(1),
-                   SpriteComp(rand(monsters), 2))
+                   SpriteComp(rand(monsters), 4))
     end
 
     # Exploding pineapples
