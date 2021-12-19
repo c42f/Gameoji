@@ -16,6 +16,20 @@ function set_god_mode(e)
     entity_killer[e] = EntityKillerComp()
 end
 
+function reconstruct_background(game)
+    background = fill(' ', game.board_size...)
+    collision = game.ledger[CollisionComp]
+    spatial = game.ledger[SpatialComp]
+    sprite = game.ledger[SpriteComp]
+    for e in @entities_in(collision && spatial)
+        if collision[e].mass >= 100 # assumed to be background/walls
+            pos = spatial[e].position
+            background[pos...] = sprite[e].icon
+        end
+    end
+    background
+end
+
 function spawn_vault(game)
     make_vault(game.board_size, reconstruct_background(game))
 end
