@@ -1,3 +1,8 @@
+name = "Gameoji"
+uuid = "b922d8d7-feb1-4b8c-9d66-f4ec45ff7804"
+authors = ["Chris Foster <chris42f@gmail.com> and contributors"]
+version = "0.1.0"
+
 [deps]
 Crayons = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
