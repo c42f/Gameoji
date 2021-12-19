@@ -1,4 +1,4 @@
-# Gamoji - an emoji-based terminal game in Julia
+# Gameoji - an emoji-based terminal game in Julia
 
 A silly little emoji game for my children 😃
 
@@ -58,7 +58,7 @@ of the Entity-Component-System programming model as implemented in
 
 ## In-person multiplayer
 
-Gamoji has rudimentary multiplayer support where multiple devices can be used
+Gameoji has rudimentary multiplayer support where multiple devices can be used
 to control characters on a single physical screen. For this, start a normal
 gameoji game on one machine, then ssh into it from a separate machine, start a
 normal Julia REPL there and run `./gameoji.jl remote`. ssh is desirable because

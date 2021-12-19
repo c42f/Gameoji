@@ -4,8 +4,8 @@ using Serialization
 # We're using a client-server message-based design here rather than the
 # RPC-style interface natural in Distributed...
 
-const protocol_magic = "Hi❤From❤Gamoji😸\n"
-const default_port = 12345
+const protocol_magic = "Hi❤From❤Gameoji😸\n"
+const gameoji_default_port = 10084
 
 function serve_game(server::Base.IOServer, event_channel, game)
     open_sockets = Set()
@@ -14,7 +14,7 @@ function serve_game(server::Base.IOServer, event_channel, game)
             socket = accept(server)
             push!(open_sockets, socket)
             peer=getpeername(socket)
-            @info "Gamoji client opened a connection" peer
+            @info "Gameoji client opened a connection" peer
             @async try
                 serve_game_session(socket, event_channel, game)
             catch exc
@@ -23,7 +23,6 @@ function serve_game(server::Base.IOServer, event_channel, game)
                         =# exception=exc,catch_backtrace()
                 end
             finally
-                @info "Game client exited" peer
                 close(socket)
                 pop!(open_sockets, socket)
             end
@@ -43,9 +42,9 @@ function serve_game(server::Base.IOServer, event_channel, game)
 end
 
 function serve_game_session(socket, event_channel, game)
+    keyboard_id = nothing
     try
         write(socket, protocol_magic)
-        keyboard_id = nothing
         while isopen(socket)
             event = deserialize(socket)
             type,value = event
@@ -62,14 +61,6 @@ function serve_game_session(socket, event_channel, game)
                 =#
             elseif type == :leave
                 close(socket)
-                # Delete player from ledger
-                player_info = game[PlayerInfoComp]
-                for player in @entities_in(player_info)
-                    if player_info[player].screen_number == keyboard_id
-                        schedule_delete!(game, player)
-                    end
-                end
-                delete_scheduled!(game)
             elseif type === :key
                 push!(event_channel, (:key, Key(keyboard_id, value)))
             end
@@ -80,11 +71,22 @@ function serve_game_session(socket, event_channel, game)
     catch exc
         @error "Error running game session" exception=(exc,catch_backtrace())
     finally
+        if !isnothing(keyboard_id)
+            # Delete player from ledger
+            player_info = game[PlayerInfoComp]
+            for player in @entities_in(player_info)
+                if player_info[player].screen_number == keyboard_id
+                    schedule_delete!(game, player)
+                end
+            end
+            delete_scheduled!(game)
+        end
         close(socket)
     end
+    @info "Player with keyboard $keyboard_id left the game"
 end
 
-function run_game_client(host=Sockets.localhost, port=default_port)
+function run_game_client(host=Sockets.localhost, port=gameoji_default_port)
     socket = connect(host, port)
     magic = String(read(socket, sizeof(protocol_magic)))
     if magic != protocol_magic

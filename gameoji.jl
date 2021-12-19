@@ -18,6 +18,8 @@ using Sockets
 const Vec2I = SVector{2,Int}
 const VI = SA{Int}
 
+bare_entity(e::Overseer.AbstractEntity) = Entity(e.id)
+
 include("inventory.jl")
 include("terminal.jl")
 
@@ -446,9 +448,9 @@ function Overseer.update(::InventoryCollectionUpdate, m::AbstractLedger)
         pos = spatial[e].position
         for collector in collectors
             if pos == collector.pos
-                push!(collector.items, e)
+                push!(collector.items, bare_entity(e))
                 # When it's in an inventory, simply delete the spatial component
-                push!(to_delete, e)
+                push!(to_delete, bare_entity(e))
                 break
             end
         end
@@ -556,12 +558,13 @@ mutable struct Gameoji <: AbstractLedger
     level_num::Int
     joined_players::Vector
     do_render::Bool
+    is_paused::Bool
 end
 
 function Gameoji(term)
     h,w = displaysize(stdout)
     board_size = VI[(w-2*sidebar_width)÷2, h]
-    Gameoji(term, 1, nothing, board_size, gameoji_ledger(), [VI[1,1]], 0, [], true)
+    Gameoji(term, 1, nothing, board_size, gameoji_ledger(), [VI[1,1]], 0, [], true, false)
 end
 
 function gameoji_ledger()
@@ -718,7 +721,7 @@ function overlay_board(func, board_size, background_chars, ledger, layout_str;
 
     spatial = ledger[SpatialComp]
     for e in @entities_in(spatial)
-        if spatial[e].position in to_delete && !(e in new_entities)
+        if spatial[e].position in to_delete && !(bare_entity(e) in new_entities)
             schedule_delete!(ledger, e)
         end
     end
@@ -859,6 +862,11 @@ function join_player!(game, screen_number, icon, keymap)
     push!(game.joined_players, (screen_number, icon, keymap))
     player = create_player!(game, screen_number, icon, keymap)
     position_players!(game, [player])
+    player
+end
+
+function delete_player!(game, player)
+    delete!(game.ledger, [player])
 end
 
 function create_player!(game, screen_number, icon, keymap)
@@ -1031,33 +1039,77 @@ include("client_server.jl")
 # Global game object for use with RemoteREPL
 game = nothing
 
+# The main game update loop
+function game_loop(game, event_channel)
+    clear_screen(stdout)
+    try
+        while true
+            reset!(game)
+            new_level!(game)
+            game.is_paused = false
+            while isopen(event_channel)
+                if !game.is_paused
+                    update(game)
+                end
+                (event_type,value) = take!(event_channel)
+                @debug "Read event" event_type value
+                if event_type === :key
+                    key = value
+                    if key.keycode == CTRL_C
+                        # Clear
+                        clear_screen(stdout)
+                        return
+                    elseif key.keycode == UInt32('p')
+                        game.is_paused = !game.is_paused
+                    end
+                end
+                if !game.is_paused
+                    # Terminal rendering is _slow_, so drop frames if there's
+                    # more events in the buffer. This reduces latency between
+                    # keyboard input and seeing the results.
+                    game.do_render = !isready(event_channel)
+                    if event_type === :key
+                        if key.keycode == CTRL_R
+                            clear_screen(stdout)
+                            break
+                        end
+                        game.input_key = key
+                    else
+                        game.input_key = nothing
+                    end
+                end
+            end
+        end
+    catch exc
+        @error "Game event loop failed" exception=(exc,catch_backtrace())
+        close(event_channel)
+        rethrow()
+    end
+end
+
 function main()
     term = TerminalMenus.terminal
     open("log.txt", "w") do logio
-        with_logger(ConsoleLogger(logio)) do
+        with_logger(ConsoleLogger(IOContext(logio, :color=>true))) do
             @sync begin
                 game_server = nothing
                 repl_server = nothing
                 try
+                    # Live code modification via RemoteREPL
                     repl_server = listen(Sockets.localhost, 27754)
                     @async begin
-                        # Allow live modifications
                         serve_repl(repl_server)
                     end
                 catch exc
                     @error "Failed to set up REPL server" exception=(exc,catch_backtrace())
                 end
                 global game = Gameoji(term)
-                main_keyboard_id = add_keyboard(game)
-                join_player!(game, 1, '👧',
-                             make_keymap(main_keyboard_id, left_hand_keys))
-                join_player!(game, 1, '👦',
-                             make_keymap(main_keyboard_id, right_hand_keys))
                 event_channel = Channel()
                 try
-                    game_server = listen(Sockets.localhost, default_port)
+                    # Game server for local players to join with keyboards from
+                    # other devices
+                    game_server = listen(Sockets.localhost, gameoji_default_port)
                     @async begin
-                        # Allow live modifications
                         serve_game(game_server, event_channel, game)
                     end
                 catch exc
@@ -1066,61 +1118,34 @@ function main()
                 @info "Initialized game"
                 try
                     rawmode(term) do
-                        clear_screen(stdout)
-                        @async try while true
-                            reset!(game)
-                            new_level!(game)
-                            is_paused = false
-                            while isopen(event_channel)
-                                if !is_paused
-                                    update(game)
-                                end
-                                flush(logio) # Hack!
-                                (event_type,value) = take!(event_channel)
-                                # Terminal rendering is _slow_, so drop frames
-                                # if there's more events in the buffer. This
-                                # reduces latency between keyboard input and
-                                # seeing the results as far as possible.
-                                @debug "Read event" event_type value
-                                if event_type === :key
-                                    key = value
-                                    if key.keycode == CTRL_C
-                                        # Clear
-                                        clear_screen(stdout)
-                                        return
-                                    elseif key.keycode == UInt32('p')
-                                        is_paused = !is_paused
-                                    end
-                                end
-                                if !is_paused
-                                    game.do_render = !isready(event_channel)
-                                    if event_type === :key
-                                        if key.keycode == CTRL_R
-                                            clear_screen(stdout)
-                                            break
-                                        end
-                                        game.input_key = key
-                                    else
-                                        game.input_key = nothing
-                                    end
-                                end
+                        # Main game loop
+                        @async game_loop(game, event_channel)
+
+                        # Frame timer events
+                        @async try
+                            frame_timer = Timer(0; interval=0.2)
+                            while true
+                                wait(frame_timer)
+                                isopen(event_channel) || break
+                                push!(event_channel, (:timer,nothing))
+                                # Hack! flush stream
+                                flush(logio)
+                            end
+                        catch exc
+                            if isopen(event_channel)
+                                @error "Adding key failed" exception=(exc,catch_backtrace())
                             end
                         end
-                        catch exc
-                            @error "Game event loop failed" exception=(exc,catch_backtrace())
-                            close(event_channel)
-                            rethrow()
-                        end
-                        frame_timer = Timer(0; interval=0.2)
-                        @async while true
-                            # Frame timer events
-                            wait(frame_timer)
-                            isopen(event_channel) || break
-                            push!(event_channel, (:timer,nothing))
-                        end
-                        # It appears we need to wait on stdin in the original
-                        # task, otherwise we miss events (??)
+
+                        # Main keyboard handling.
+                        # It seems we need run this in the original task,
+                        # otherwise we miss events (??)
                         try
+                            main_keyboard_id = add_keyboard(game)
+                            join_player!(game, 1, '👧',
+                                         make_keymap(main_keyboard_id, left_hand_keys))
+                            join_player!(game, 1, '👦',
+                                         make_keymap(main_keyboard_id, right_hand_keys))
                             while true
                                 keycode = read_key(stdin)
                                 key = Key(main_keyboard_id, keycode)
@@ -1145,6 +1170,7 @@ function main()
             end
         end
     end
+    write(stdout, read("log.txt"))
 end
 
 function test_level_gen()
@@ -1154,8 +1180,23 @@ function test_level_gen()
     background_chars = fill(' ', reverse(displaysize(stdout)) .÷ (2,1))
 
     make_entry!(game, background_chars)
-    make_vault!(game, background_chars)
-    make_exit!(game, background_chars)
+    #make_vault!(game, background_chars)
+    #make_exit!(game, background_chars)
 
-    generate_maze!(background_chars)
+    # Convert maze board into entities
+    for i in 1:game.board_size[1]
+        for j in 1:game.board_size[2]
+            c = background_chars[i,j]
+            if c == brick
+                Entity(game.ledger,
+                       SpriteComp(c, 0),
+                       SpatialComp(VI[i,j], VI[0,0]),
+                       CollisionComp(100))
+            end
+        end
+    end
+
+    #generate_maze!(background_chars)
+    #printboard(stdout, background_chars)
+    game
 end
