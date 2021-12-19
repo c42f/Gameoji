@@ -41,6 +41,12 @@ InventoryComp() = InventoryComp(Items())
     screen_number::Int # Screen they're connected to
 end
 
+# Health contained within a health pack item
+@component struct ItemHealthComp
+    item_health::Int
+end
+
+# Health of a PC or monster
 @component struct HealthComp
     health::Int
 end
@@ -414,13 +420,12 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
             elseif value == '💠' && has_item
                 # Player healing other player.
                 # TODO: Move this out to be a more generic effect in its own system?
-                for other_e in @entities_in(spatial && player_info && sprite)
-                    if spatial[other_e].position == position
-                        sprite[other_e] = SpriteComp(player_info[other_e].base_icon,
-                                                     sprite[other_e].draw_priority)
+                for other_e in @entities_in(game, SpatialComp && PlayerInfoComp && HealthComp)
+                    if other_e.position == position && bare_entity(other_e) != bare_entity(e)
+                        health[other_e] = HealthComp(other_e.health + 10)
+                        break
                     end
                 end
-                sprite = m[SpriteComp]
             end
         end
         spatial[e] = SpatialComp(position, velocity)
@@ -436,6 +441,7 @@ Overseer.requested_components(::InventoryCollectionUpdate) = (InventoryComp,Spat
 
 function Overseer.update(::InventoryCollectionUpdate, m::AbstractLedger)
     inventory = m[InventoryComp]
+    item_health = m[ItemHealthComp]
     health = m[HealthComp]
     spatial = m[SpatialComp]
     sprite = m[SpriteComp]
@@ -453,10 +459,10 @@ function Overseer.update(::InventoryCollectionUpdate, m::AbstractLedger)
                 continue
             end
             if pos == collector.pos
-                if e in health && collector.e in health
+                if e in item_health && collector.e in health
                     # Transfer health
-                    health[collector.e] = HealthComp(health[collector.e].health + health[e].health)
-                    health[e] = HealthComp(0)
+                    health[collector.e] = HealthComp(health[collector.e].health + item_health[e].item_health)
+                    item_health[e] = ItemHealthComp(0)
                 end
                 push!(collector.items, bare_entity(e))
                 push!(to_delete, bare_entity(e))

@@ -320,12 +320,12 @@ function new_level!(game)
     for _=1:5
         seed_rand!(game.ledger, background_chars,
                    CollectibleComp(),
-                   HealthComp(2),
+                   ItemHealthComp(2),
                    SpriteComp('💖', 3))
     end
 
     monsters = collect("👺👹")
-    for _=1:(game.level_num-1)
+    for _=1:2*(game.level_num-1)
         seed_rand!(game.ledger, background_chars,
                    RandomVelocityControlComp(),
                    EntityKillerComp(),
