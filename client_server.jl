@@ -49,10 +49,12 @@ function serve_game_session(socket, event_channel, game)
             event = deserialize(socket)
             type,value = event
             if type === :join
-                icon = value
+                icons = value
                 keyboard_id = add_keyboard(game)
-                join_player!(game, keyboard_id, icon,
-                             make_keymap(keyboard_id, right_hand_keys))
+                for (icon,keys) in zip(icons, [right_hand_keys, left_hand_keys])
+                    join_player!(game, keyboard_id, icon,
+                                 make_keymap(keyboard_id, keys))
+                end
                 # TODO: Rendering
                 #=
                 add_render_callback(game, player) do board
@@ -92,7 +94,7 @@ function run_game_client(host=Sockets.localhost, port=gameoji_default_port)
     if magic != protocol_magic
         error("Gameoji protocol magic number mismatch: $(repr(magic)) != $(repr(protocol_magic))")
     end
-    serialize(socket, (:join, '🧔'))
+    serialize(socket, (:join, ['🧔', '👩']))
     rawmode(TerminalMenus.terminal) do
         while true
             keycode = read_key(stdin)
