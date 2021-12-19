@@ -990,7 +990,7 @@ function new_level!(game)
     end
 
     monsters = collect("👺👹")
-    for _=1:4*(game.level_num-1)
+    for _=1:(game.level_num-1)
         seed_rand!(game.ledger, background_chars,
                    RandomVelocityControlComp(),
                    EntityKillerComp(),
@@ -1172,32 +1172,4 @@ function main()
         end
     end
     write(stdout, read("log.txt"))
-end
-
-function test_level_gen()
-    term = TerminalMenus.terminal
-    game = Gameoji(term)
-
-    background_chars = fill(' ', reverse(displaysize(stdout)) .÷ (2,1))
-
-    make_entry!(game, background_chars)
-    #make_vault!(game, background_chars)
-    #make_exit!(game, background_chars)
-
-    # Convert maze board into entities
-    for i in 1:game.board_size[1]
-        for j in 1:game.board_size[2]
-            c = background_chars[i,j]
-            if c == brick
-                Entity(game.ledger,
-                       SpriteComp(c, 0),
-                       SpatialComp(VI[i,j], VI[0,0]),
-                       CollisionComp(100))
-            end
-        end
-    end
-
-    #generate_maze!(background_chars)
-    #printboard(stdout, background_chars)
-    game
 end
