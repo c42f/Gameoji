@@ -75,7 +75,7 @@ function wall_avoiding_perceptron(coeffs, temperature, d, env)
 end
 
 function generate_maze!(board)
-    @load "perceptrons_1.jld2" perceptrons
+    perceptrons = jldopen(f->f["perceptrons"], joinpath(Base.pkgdir(Gameoji), "data/perceptrons_1.jld2"))
     quality_dist = Categorical(normalize(first.(perceptrons), 1))
     coeffs = last(perceptrons[rand(quality_dist)])
     #coeffs = randn(3,25)

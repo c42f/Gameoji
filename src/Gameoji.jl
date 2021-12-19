@@ -1,8 +1,4 @@
-#!/bin/bash
-#=
-exec julia --project=. -e 'include(popfirst!(ARGS)); if (length(ARGS) >= 1 && ARGS[1] == "remote") ; run_game_client() else main() end' \
-    "${BASH_SOURCE[0]}" "$@"
-=#
+module Gameoji
 
 using Overseer
 using Overseer: EMPTY_ENTITY
@@ -25,7 +21,7 @@ include("terminal.jl")
 #-------------------------------------------------------------------------------
 # Main game data structures
 
-mutable struct Gameoji <: AbstractLedger
+mutable struct Game <: AbstractLedger
     term
     next_keyboard_id::Int
     input_key::Union{Key,Nothing}
@@ -38,10 +34,10 @@ mutable struct Gameoji <: AbstractLedger
     is_paused::Bool
 end
 
-function Gameoji(term)
+function Game(term)
     h,w = displaysize(stdout)
     board_size = VI[(w-2*sidebar_width)÷2, h]
-    Gameoji(term, 1, nothing, board_size, gameoji_ledger(), [VI[1,1]], 0, [], true, false)
+    Game(term, 1, nothing, board_size, gameoji_ledger(), [VI[1,1]], 0, [], true, false)
 end
 
 function gameoji_ledger()
@@ -56,7 +52,7 @@ function gameoji_ledger()
     )
 end
 
-function reset!(game::Gameoji)
+function reset!(game::Game)
     empty!(entities(game))
     game.input_key = nothing
     game.ledger = gameoji_ledger()
@@ -66,12 +62,12 @@ function reset!(game::Gameoji)
     end
 end
 
-function Base.show(io::IO, game::Gameoji)
-    print(io, "Gameoji on $(game.board_size[1])×$(game.board_size[2]) board with $(length(game.ledger.entities) - length(game.ledger.free_entities)) current entities")
+function Base.show(io::IO, game::Game)
+    print(io, "Game on $(game.board_size[1])×$(game.board_size[2]) board with $(length(game.ledger.entities) - length(game.ledger.free_entities)) current entities")
 end
 
-Overseer.stages(game::Gameoji) = stages(game.ledger)
-Overseer.ledger(game::Gameoji) = game.ledger
+Overseer.stages(game::Game) = stages(game.ledger)
+Overseer.ledger(game::Game) = game.ledger
 
 
 include("inventory.jl")
@@ -81,9 +77,6 @@ include("players.jl")
 include("maze_levels.jl")
 include("client_server.jl")
 
-
-# Global game object for use with RemoteREPL
-game = nothing
 
 # The main game update loop
 function game_loop(game, event_channel)
@@ -150,7 +143,7 @@ function main()
                 catch exc
                     @error "Failed to set up REPL server" exception=(exc,catch_backtrace())
                 end
-                global game = Gameoji(term)
+                global game = Game(term)
                 event_channel = Channel()
                 try
                     # Game server for local players to join with keyboards from
@@ -218,4 +211,6 @@ function main()
         end
     end
     write(stdout, read("log.txt"))
+end
+
 end

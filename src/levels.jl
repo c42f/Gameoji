@@ -50,7 +50,7 @@ function flood_fill!(ledger::AbstractLedger, board, position, max_fill, componen
     end
 end
 
-empty_board(game::Gameoji) = empty_board(game.board_size)
+empty_board(game::Game) = empty_board(game.board_size)
 empty_board(board_size::AbstractVector) = fill(EMPTY_ENTITY, board_size...)
 
 function fill_board(board_size, ledger, entities)
