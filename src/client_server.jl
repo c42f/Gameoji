@@ -51,11 +51,8 @@ function serve_game_session(socket, event_channel, game)
             if type === :join
                 icons = value
                 keyboard_id = add_keyboard(game)
-                for (icon,keys) in zip(icons, [right_hand_keys, left_hand_keys])
-                    join_player!(game, keyboard_id, icon,
-                                 make_keymap(keyboard_id, keys))
-                end
-                # TODO: Rendering
+                join_players!(game, icons, keyboard_id, keyboard_id)
+                # TODO: Client-side rendering?
                 #=
                 add_render_callback(game, player) do board
                     serialize(socket, (:render, board))
@@ -88,13 +85,13 @@ function serve_game_session(socket, event_channel, game)
     @info "Player with keyboard $keyboard_id left the game"
 end
 
-function run_game_client(host=Sockets.localhost, port=gameoji_default_port)
+function run_game_client(; player_icons, host=Sockets.localhost, port=gameoji_default_port)
     socket = connect(host, port)
     magic = String(read(socket, sizeof(protocol_magic)))
     if magic != protocol_magic
         error("Gameoji protocol magic number mismatch: $(repr(magic)) != $(repr(protocol_magic))")
     end
-    serialize(socket, (:join, ['🧔', '👩']))
+    serialize(socket, (:join, player_icons))
     rawmode(TerminalMenus.terminal) do
         while true
             keycode = read_key(stdin)

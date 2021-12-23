@@ -119,19 +119,29 @@ function format_sidebar(height, content)
     formatted = format_sidebar_line.(content)
 end
 
-function printboard(io, board, left_sidebar=nothing, right_sidebar=nothing)
+function printboard(io, board, sidebars)
     for i=size(board,2):-1:1
         j = size(board,2)-i+1
-        if !isnothing(left_sidebar)
+        if !isempty(sidebars)
+            left_sidebar = sidebars[1]
+            # Render first sidebar on left
             x = j <= length(left_sidebar) ? left_sidebar[j] : nothing
             print(io, format_sidebar_line(x), '│')
         end
         print(io, pad_emoji_string(board[:,i], true))
-        if !isnothing(right_sidebar)
-            x = j <= length(right_sidebar) ? right_sidebar[j] : nothing
-            print(io, '│', format_sidebar_line(x))
+        if length(sidebars) > 1
+            # Render other sidebars on right
+            for sidebar in sidebars[2:end]
+                x = j <= length(sidebar) ? sidebar[j] : nothing
+                print(io, '│', format_sidebar_line(x))
+            end
         end
         i != 1 && println(io)
     end
 end
 
+# Get the maximum size of a board which fits into the terminal
+function max_board_size(io, num_players)
+    h,w = displaysize(io)
+    board_size = VI[(w-num_players*sidebar_width)÷2, h]
+end

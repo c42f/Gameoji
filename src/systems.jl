@@ -36,6 +36,8 @@ end
 end
 InventoryComp() = InventoryComp(Items())
 
+const MAIN_SCREEN_NUMBER = 1
+
 @component struct PlayerInfoComp
     base_icon::Char
     screen_number::Int # Screen they're connected to
@@ -548,20 +550,19 @@ function Overseer.update(::TerminalRenderer, game::AbstractLedger)
     # Collect and render inventories
     sidebars = []
     for e in @entities_in(game, InventoryComp && PlayerInfoComp && HealthComp)
-        if e.screen_number != 1
+        if e.screen_number != MAIN_SCREEN_NUMBER
             continue
         end
         sidebar = []
         push!(sidebar, " $(e.base_icon)")
         push!(sidebar, '💖'=>e.health)
-        push!(sidebar, "─────")
-        item_counts = StatsBase.countmap([sprite_comp[i].icon
-                                          for i in e.items])
+        push!(sidebar, repeat('─', sidebar_width-1))
+        item_counts = StatsBase.countmap([sprite_comp[i].icon for i in e.items])
         append!(sidebar, sort(item_counts))
         push!(sidebars, sidebar)
     end
     # Render
     print(game.term, "\e[1;1H") # Home position
-    print(game.term, sprint(printboard, board, sidebars...))
+    print(game.term, sprint(printboard, board, sidebars))
 end
 

@@ -1,5 +1,5 @@
 # Keys. May be bound to a keyboard using make_keymap()
-right_hand_keys = Dict(
+right_keys = Dict(
     ARROW_UP   =>(:move, VI[0, 1]),
     ARROW_DOWN =>(:move, VI[0,-1]),
     ARROW_LEFT =>(:move, VI[-1,0]),
@@ -7,7 +7,7 @@ right_hand_keys = Dict(
     '0'        =>(:use_item, '💣'),
     '9'        =>(:use_item, '💠'))
 
-left_hand_keys = Dict(
+left_keys = Dict(
     'w'=>(:move, VI[0, 1]),
     's'=>(:move, VI[0,-1]),
     'a'=>(:move, VI[-1,0]),
@@ -15,11 +15,28 @@ left_hand_keys = Dict(
     '1'=>(:use_item, '💣'),
     '2'=>(:use_item, '💠'))
 
+middle_keys = Dict(
+    'i'=>(:move, VI[0, 1]),
+    'k'=>(:move, VI[0,-1]),
+    'j'=>(:move, VI[-1,0]),
+    'l'=>(:move, VI[1, 0]),
+    '5'=>(:use_item, '💣'),
+    '6'=>(:use_item, '💠'))
+
 function join_player!(game, screen_number, icon, keymap)
     push!(game.joined_players, (screen_number, icon, keymap))
     player = create_player!(game, screen_number, icon, keymap)
     position_players!(game, [player])
     player
+end
+
+# TODO: Do we need to distinguish keyboard_id and screen_number?
+function join_players!(game, player_icons, keyboard_id, screen_number)
+    all_keys = [left_keys, right_keys, middle_keys]
+    for (icon,keys) in zip(player_icons, all_keys)
+        join_player!(game, screen_number, icon,
+                     make_keymap(keyboard_id, keys))
+    end
 end
 
 function delete_player!(game, player)

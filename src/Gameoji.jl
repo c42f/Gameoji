@@ -34,9 +34,7 @@ mutable struct Game <: AbstractLedger
     is_paused::Bool
 end
 
-function Game(term)
-    h,w = displaysize(stdout)
-    board_size = VI[(w-2*sidebar_width)÷2, h]
+function Game(term, board_size)
     Game(term, 1, nothing, board_size, gameoji_ledger(), [VI[1,1]], 0, [], true, false)
 end
 
@@ -57,6 +55,7 @@ function reset!(game::Game)
     game.input_key = nothing
     game.ledger = gameoji_ledger()
     game.level_num = 0
+    # Recreate all players
     for (screen_number,icon,keymap) in game.joined_players
         create_player!(game, screen_number, icon, keymap)
     end
@@ -80,13 +79,13 @@ include("client_server.jl")
 
 # The main game update loop
 function game_loop(game, event_channel)
-    clear_screen(stdout)
     while true
         Base.invokelatest() do
             reset!(game)
             new_level!(game)
         end
         game.is_paused = false
+        clear_screen(stdout)
         while isopen(event_channel)
             if !game.is_paused
                 # Allow live code modification
@@ -123,7 +122,7 @@ function game_loop(game, event_channel)
     end
 end
 
-function main()
+function run_game(player_icons)
     term = TerminalMenus.terminal
     open("log.txt", "w") do logio
         with_logger(ConsoleLogger(IOContext(logio, :color=>true))) do
@@ -139,7 +138,8 @@ function main()
                 catch exc
                     @error "Failed to set up REPL server" exception=(exc,catch_backtrace())
                 end
-                global game = Game(term)
+                # Use global Game object for access from RemoteREPL.jl
+                global game = Game(term, max_board_size(stdout, length(player_icons)))
                 event_channel = Channel()
                 try
                     # Game server for local players to join with keyboards from
@@ -185,10 +185,8 @@ function main()
                         # otherwise we miss events (??)
                         try
                             main_keyboard_id = add_keyboard(game)
-                            join_player!(game, 1, '👧',
-                                         make_keymap(main_keyboard_id, left_hand_keys))
-                            join_player!(game, 1, '👦',
-                                         make_keymap(main_keyboard_id, right_hand_keys))
+                            join_players!(game, player_icons, main_keyboard_id,
+                                          MAIN_SCREEN_NUMBER)
                             while true
                                 keycode = read_key(stdin)
                                 key = Key(main_keyboard_id, keycode)
@@ -214,6 +212,40 @@ function main()
         end
     end
     write(stdout, read("log.txt"))
+end
+
+function main(args)
+    remote = false
+    i = 1
+    player_icons = []
+    while i <= length(args)
+        arg = args[i]
+        if arg == "-r"
+            remote = true
+        elseif arg == "-p"
+            i += 1
+            if i > length(args) || length(args[i]) > 1
+                println(stderr, "ERROR: Expected emoji after -p option")
+                exit(1)
+            end
+            push!(player_icons, only(args[i]))
+        end
+        i += 1
+    end
+    if isempty(player_icons)
+        # Some icons which have been chosen before...
+        # 👦 🐖 🦊
+        player_icons = remote ? ['🧔'] : ['👦', '👧']
+    end
+    if length(player_icons) > 3
+        println(stderr, "ERROR: There are keymaps defined for only up to three players")
+        exit(1)
+    end
+    if remote
+        Gameoji.run_game_client(; player_icons)
+    else
+        run_game(player_icons)
+    end
 end
 
 end
