@@ -63,7 +63,11 @@ function pad_emoji_string(str, expand_narrow_chars)
     for c in str
         print(io, c)
         if (expand_narrow_chars && textwidth(c) == 1) || c in (cupcake, brick, parrot)
-            print(io, ' ')
+            if c == '░'
+                print(io, c)
+            else
+                print(io, ' ')
+            end
         end
     end
     String(take!(io))

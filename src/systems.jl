@@ -547,6 +547,60 @@ function Overseer.update(::TerminalRenderer, game::AbstractLedger)
             board[pos...] = obj.is_dead ? '💀' : obj.sprite.icon
         end
     end
+    # Update visibility mask
+    is_wall = falses(game.board_size...)
+    for e in @entities_in(game, SpriteComp && SpatialComp && CollisionComp)
+        if e.icon in (brick, '⬛')  # Ugh!!
+            is_wall[e.position...] = true
+        end
+    end
+    visibility = game.visibility
+    border_coords = Vec2I[]
+    for x in 1:game.board_size[1]
+        push!(border_coords, SA[x, 1])
+        push!(border_coords, SA[x, game.board_size[2]])
+    end
+    for y in 1:game.board_size[2]
+        push!(border_coords, SA[1, y])
+        push!(border_coords, SA[game.board_size[1], y])
+    end
+    max_visible_range = norm(game.board_size)/3
+    for player in @entities_in(game, SpatialComp && PlayerInfoComp)
+        # Area around the player is visible
+        pos = player.position
+        # Suuuuper simple ray casting!
+        for v in border_coords
+            w = v - pos
+            l = norm(w)
+            w = normalize(w)
+            hit_wall = false
+            for t in range(0, min(max_visible_range, l), length=ceil(Int, 2*l))
+                p2 = round.(Int, pos + t*w)
+                visibility[p2...] = true
+                # Always allow to see a small region around the player
+                always_visible_radius = 4
+                if hit_wall && t > always_visible_radius
+                    break
+                end
+                p = floor.(Int, pos + t*w)
+                diag_walls = false
+                if 1 <= p[1] < game.board_size[1] && 1 <= p[2] < game.board_size[2]
+                    diag_walls =
+                        (is_wall[p...] && is_wall[(p + SA[1,1])...]) || 
+                        (is_wall[(p + SA[1,0])...] && is_wall[(p + SA[0,1])...])
+                end
+
+                if is_wall[p2...] || diag_walls
+                    hit_wall = true
+                end
+            end
+        end
+    end
+    for ind in eachindex(board, visibility)
+        if !visibility[ind]
+            board[ind] = '░'
+        end
+    end
     # Collect and render inventories
     sidebars = []
     for e in @entities_in(game, InventoryComp && PlayerInfoComp && HealthComp)
@@ -565,4 +619,3 @@ function Overseer.update(::TerminalRenderer, game::AbstractLedger)
     print(game.term, "\e[1;1H") # Home position
     print(game.term, sprint(printboard, board, sidebars))
 end
-

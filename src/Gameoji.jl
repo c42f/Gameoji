@@ -26,6 +26,7 @@ mutable struct Game <: AbstractLedger
     next_keyboard_id::Int
     input_key::Union{Key,Nothing}
     board_size::Vec2I
+    visibility::BitMatrix
     ledger::Ledger
     start_positions
     level_num::Int
@@ -35,7 +36,7 @@ mutable struct Game <: AbstractLedger
 end
 
 function Game(term, board_size)
-    Game(term, 1, nothing, board_size, gameoji_ledger(), [VI[1,1]], 0, [], true, false)
+    Game(term, 1, nothing, board_size, falses(board_size...), gameoji_ledger(), [VI[1,1]], 0, [], true, false)
 end
 
 function gameoji_ledger()

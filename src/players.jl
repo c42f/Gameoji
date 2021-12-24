@@ -33,6 +33,10 @@ end
 # TODO: Do we need to distinguish keyboard_id and screen_number?
 function join_players!(game, player_icons, keyboard_id, screen_number)
     all_keys = [left_keys, right_keys, middle_keys]
+    if length(player_icons) == 1
+        # Prefer right hand keys for single player
+        all_keys = [right_keys]
+    end
     for (icon,keys) in zip(player_icons, all_keys)
         join_player!(game, screen_number, icon,
                      make_keymap(keyboard_id, keys))

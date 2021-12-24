@@ -235,6 +235,7 @@ end
 
 function new_level!(game)
     game.level_num += 1
+    game.visibility .= false
 
     # Remove players from the board; delete everything with a position
     let
