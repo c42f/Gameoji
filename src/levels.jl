@@ -296,7 +296,13 @@ function new_level!(game)
                    BoidControlComp(),
                    SpriteComp('🐔', 10),
                    CollisionComp(1),
-                   CollectibleComp()
+                   CollectibleComp(),
+                   SpawnerComp(
+                       (SpriteComp('🥚', 10),
+                        CollectibleComp(),
+                        ItemHealthComp(1)),
+                       0.0005
+                   )
                   )
     end
 

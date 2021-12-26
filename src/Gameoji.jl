@@ -45,7 +45,8 @@ function gameoji_ledger()
         Stage(:dynamics, [PositionUpdate()]),
         Stage(:dynamics_post, [TimerUpdate()]),
         Stage(:lifetime, [InventoryCollectionUpdate(), LifetimeUpdate(),
-                          TimedExplosion(), ExplosionDamageUpdate(), EntityKillUpdate()]),
+                          TimedExplosion(), ExplosionDamageUpdate(), EntityKillUpdate(),
+                          SpawnUpdate()]),
         Stage(:new_level, [NewLevelUpdate()]),
         Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
     )

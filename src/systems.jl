@@ -83,6 +83,10 @@ end
 @component struct NewLevelTriggerComp
 end
 
+@component struct SpawnerComp
+    spawn_prototype  # components of spawned objects
+    spawn_probability::Float64
+end
 
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
@@ -297,7 +301,7 @@ end
 # Spatially deleting entities
 struct EntityKillUpdate <: System end
 
-Overseer.requested_components(::EntityKillUpdate) = (SpatialComp,EntityKillerComp)
+Overseer.requested_components(::EntityKillUpdate) = (SpatialComp,EntityKillerComp,HealthComp)
 
 function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
     spatial = m[SpatialComp]
@@ -327,7 +331,7 @@ end
 # Spatially deleting entities
 struct ExplosionDamageUpdate <: System end
 
-Overseer.requested_components(::ExplosionDamageUpdate) = (SpatialComp,ExplosionDamageComp,ExplosiveReactionComp)
+Overseer.requested_components(::ExplosionDamageUpdate) = (SpatialComp,ExplosionDamageComp,ExplosiveReactionComp,HealthComp)
 
 function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
     spatial = m[SpatialComp]
@@ -373,6 +377,20 @@ function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
     delete_scheduled!(m)
 end
 
+struct SpawnUpdate <: System end
+
+Overseer.requested_components(::SpawnUpdate) = (SpatialComp,SpawnerComp)
+
+function Overseer.update(::SpawnUpdate, game::AbstractLedger)
+    for spawner in @entities_in(game, SpatialComp && SpawnerComp)
+        if rand() < spawner.spawn_probability
+            Entity(game,
+                   SpatialComp(spawner.position),
+                   spawner.spawn_prototype...
+            )
+        end
+    end
+end
 
 #-------------------------------------------------------------------------------
 # Player Control
