@@ -136,13 +136,13 @@ end
 
 function make_vault!(game, background)
     layout = """
-          ⬛⬛⬛⬛⬛⬛
+        ⬛⬛⬛⬛⬛⬛⬛⬛
         ⬛............⬛
         ⬛............⬛
         ⬛............⬛
         ⬛............⬛
         ⬛............⬛
-          ⬛⬛🚪⬛⬛⬛  """
+        ⬛⬛⬛🚪⬛⬛⬛⬛"""
 
     overlay_board(game.board_size, background, game.ledger, layout) do pos, c
         treasure = "💠💰💎"
