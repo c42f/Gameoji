@@ -314,7 +314,7 @@ function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
             if e in health
                 h = health[e].health
                 if h > 0
-                    health[e] = HealthComp(h - 1)
+                    health[e] = HealthComp(h - 5)
                 end
             else
                 schedule_delete!(m, e)
@@ -424,7 +424,7 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
                 # TODO: Move this out to be a more generic effect in its own system?
                 for other_e in @entities_in(game, SpatialComp && PlayerInfoComp && HealthComp)
                     if other_e.position == position && bare_entity(other_e) != bare_entity(e)
-                        health[other_e] = HealthComp(other_e.health + 10)
+                        health[other_e] = HealthComp(other_e.health + 5)
                         break
                     end
                 end

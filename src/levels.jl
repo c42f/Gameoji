@@ -254,7 +254,9 @@ function new_level!(game)
     background_chars = fill(' ', game.board_size...)
 
     make_entry!(game, background_chars)
-    make_vault!(game, background_chars)
+    if rand() < 0.3
+        make_vault!(game, background_chars)
+    end
     make_exit!(game, background_chars)
 
     generate_maze!(background_chars)
@@ -299,11 +301,11 @@ function new_level!(game)
     end
 
     # Collectibles
-    fruits = collect("🍉🍌🍏🍐🍑🍒🍓")
-    for _=1:10
+    edibles = collect("🍉🍌🍏🍐🍑🍒🍓🍊🥝🍅🍎🥑🥕🍈🍇🥦🥔🌽🥥")
+    for _=1:30
         seed_rand!(game.ledger, background_chars,
                    CollectibleComp(),
-                   SpriteComp(rand(fruits), 2))
+                   SpriteComp(rand(edibles), 2))
     end
     treasure = collect("💰💎")
     for _=1:10
