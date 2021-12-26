@@ -236,7 +236,7 @@ function main(args)
     if isempty(player_icons)
         # Some icons which have been chosen before...
         # 👦 🐖 🦊
-        player_icons = remote ? ['🧔'] : ['👦', '👧']
+        player_icons = remote ? ['🧔'] : ['👧', '👦']
     end
     if length(player_icons) > 3
         println(stderr, "ERROR: There are keymaps defined for only up to three players")
