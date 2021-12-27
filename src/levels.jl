@@ -190,6 +190,7 @@ function spawn_exit(game, background=reconstruct_background(game))
             Entity(game.ledger, pos,
                    SpriteComp(c, 0),
                    NewLevelTriggerComp(),
+                   DamageImmunity(BITE_DAMAGE)
                   )
         else
             Entity(game.ledger, pos,
@@ -398,8 +399,10 @@ function new_level!(game)
     edibles = collect("🍉🍌🍏🍐🍑🍒🍓🍊🥝🍅🍎🥑🥕🍈🍇🥦🥔🌽🥥")
     for _=1:30
         seed_rand!(game.ledger, background_chars,
-                   CollectibleComp(),
-                   SpriteComp(rand(edibles), 2))
+            CollectibleComp(),
+            SpriteComp(rand(edibles), 2),
+            DamageImmunity(BITE_DAMAGE),
+        )
     end
     treasure = collect("💰💎")
     for _=1:10
@@ -419,8 +422,10 @@ function new_level!(game)
     # Health packs
     for _=1:2
         seed_rand!(game.ledger, background_chars,
-                   CollectibleComp(),
-                   SpriteComp('💠', 2))
+            CollectibleComp(),
+            SpriteComp('💠', 2),
+            DamageImmunity(BITE_DAMAGE),
+        )
     end
     for _=1:5
         seed_rand!(game.ledger, background_chars,

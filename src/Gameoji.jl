@@ -25,6 +25,7 @@ mutable struct Game <: AbstractLedger
     term
     next_keyboard_id::Int
     input_key::Union{Key,Nothing}
+    term_size::Vec2I
     board_size::Vec2I
     visibility::BitMatrix
     ledger::Ledger
@@ -35,8 +36,9 @@ mutable struct Game <: AbstractLedger
     is_paused::Bool
 end
 
-function Game(term, board_size)
-    Game(term, 1, nothing, board_size, falses(board_size...), gameoji_ledger(), [VI[1,1]], 0, [], true, false)
+function Game(term, term_size, board_size)
+    Game(term, 1, nothing, term_size, board_size,
+         falses(board_size...), gameoji_ledger(), [VI[1,1]], 0, [], true, false)
 end
 
 function gameoji_ledger()
@@ -167,7 +169,9 @@ function run_game(player_icons)
                     @error "Failed to set up REPL server" exception=(exc,catch_backtrace())
                 end
                 # Use global Game object for access from RemoteREPL.jl
-                global game = Game(term, max_board_size(stdout, length(player_icons)))
+                tsize = term_size(term)
+                global game = Game(term, tsize,
+                                   max_board_size(tsize, length(player_icons)))
                 event_channel = Channel()
                 try
                     # Game server for local players to join with keyboards from
@@ -245,6 +249,7 @@ end
 function main(args)
     remote = false
     i = 1
+    num_players = 2
     player_icons = []
     while i <= length(args)
         arg = args[i]
@@ -261,11 +266,18 @@ function main(args)
         i += 1
     end
     if isempty(player_icons)
-        # Some icons which have been chosen before...
-        # 👦 🐖 🦊
-        player_icons = remote ? ['🧔'] : ['👧', '👦']
+        selection = string.(collect("👧👦🧔🐖👾🦊"))
+        push!(selection, "[none]")
+        none = length(selection)
+        menu = REPL.TerminalMenus.RadioMenu(selection)
+        p1 = REPL.TerminalMenus.request("Select player 1", menu, cursor=1)
+        p2 = REPL.TerminalMenus.request("Select player 2", menu, cursor=2)
+        p3 = REPL.TerminalMenus.request("Select player 3", menu, cursor=none)
+        p1 != none && push!(player_icons, only(selection[p1]))
+        p2 != none && push!(player_icons, only(selection[p2]))
+        p3 != none && push!(player_icons, only(selection[p3]))
     end
-    if length(player_icons) > 3
+    if isempty(length(player_icons)) || length(player_icons) > 3
         println(stderr, "ERROR: There are keymaps defined for only up to three players")
         exit(1)
     end

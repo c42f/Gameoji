@@ -126,9 +126,9 @@ function format_sidebar(height, content)
     formatted = format_sidebar_line.(content)
 end
 
-function printboard(io, board, sidebars, statusbar)
+function printboard(io, term_size, board, sidebars, statusbar)
     sb_tw = textwidth(statusbar) + 2
-    w = 2*(size(board,1) + sidebar_width)
+    w = term_size[1]
     w1 = (w - sb_tw) ÷ 2
     println(io, repeat('─', w1), ' ', statusbar, ' ', repeat('─', w - w1 - sb_tw))
     for i = size(board,2):-1:1
@@ -151,8 +151,14 @@ function printboard(io, board, sidebars, statusbar)
     end
 end
 
-# Get the maximum size of a board which fits into the terminal
-function max_board_size(io, num_players)
+# Get terminal size as width,height
+function term_size(io)
     h,w = displaysize(io)
+    SA[w,h]
+end
+
+# Get the maximum size of a board which fits into the terminal
+function max_board_size(tsize, num_players)
+    w,h = tsize
     board_size = VI[(w-num_players*sidebar_width)÷2, h-1]
 end

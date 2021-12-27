@@ -633,5 +633,5 @@ function Overseer.update(::TerminalRenderer, game::AbstractLedger)
     statusbar = "Level $(game.level_num)"
     # Render
     print(game.term, "\e[1;1H") # Home position
-    print(game.term, sprint(printboard, board, sidebars, statusbar))
+    print(game.term, sprint(printboard, game.term_size, board, sidebars, statusbar))
 end
