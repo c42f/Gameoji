@@ -26,11 +26,6 @@ end
     icons::Vector{Char}
 end
 
-@component struct ExplosionComp
-    deadline::Int
-    radius::Int
-end
-
 @component struct InventoryComp
     items::Items
 end
@@ -63,14 +58,71 @@ end
 @component struct BoidControlComp
 end
 
+const DamageFlag       = UInt32
+const NO_DAMAGE        = DamageFlag(0)
+const EXPLOSION_DAMAGE = DamageFlag(1<<0)
+const BITE_DAMAGE      = DamageFlag(1<<1)
+const ALL_DAMAGE       = EXPLOSION_DAMAGE | BITE_DAMAGE
+
+function has_flag(flags::DamageFlag, flag::DamageFlag)
+    flags & flag == flag
+end
+
+function combine_flags(flags::DamageFlag...)
+    fl = NO_DAMAGE
+    for f in flags
+        fl |= f
+    end
+    return fl
+end
+
+@component struct DamageDealer
+    damage_type::DamageFlag
+    damage_amount::Int
+end
+
+@component struct DamageImmunity
+    damage_immunity::DamageFlag
+end
+
+# Reaction to dying
+@component struct DeathAction
+    death_action::Union{Symbol,Function}
+end
+
+function do_death(game, e, death_action, position)
+    if e in death_action
+        action = death_action[e].death_action
+        if action isa Symbol
+            # Hardcoded actions for dispatch efficiency
+            if action === :explode || action === :explode2
+                r = (action === :explode) ? 1 : 2
+                for i in -r:r, j in -r:r
+                    Entity(game,
+                        SpatialComp(position + VI[i,j], VI[0,0]),
+                        SpriteComp('💥', 50),
+                        TimerComp(),
+                        LifetimeComp(1),
+                        DamageDealer(EXPLOSION_DAMAGE, 1),
+                        DamageImmunity(ALL_DAMAGE),
+                    )
+                end
+                schedule_delete!(game, e)
+            elseif action == :nothing
+                # pass
+            else
+                @warn "Unknown death action: $action"
+            end
+        else
+            # Any other arbitrary action for generality
+            action(game, e, position)
+        end
+    else
+        schedule_delete!(game, e)
+    end
+end
+
 @component struct EntityKillerComp
-end
-
-@component struct ExplosionDamageComp
-end
-
-@component struct ExplosiveReactionComp
-    type::Symbol # :none :damage :explode :disappear (default)
 end
 
 @component struct LifetimeComp
@@ -83,9 +135,15 @@ end
 @component struct NewLevelTriggerComp
 end
 
-@component struct SpawnerComp
-    spawn_prototype  # components of spawned objects
+@component struct Spawner
+    do_spawn::Function # f(game, position)
     spawn_probability::Float64
+end
+
+function Spawner(components::Tuple, probability)
+    Spawner(probability) do game, pos
+        Entity(game, pos, components...)
+    end
 end
 
 #-------------------------------------------------------------------------------
@@ -246,150 +304,102 @@ end
 
 
 #-------------------------------------------------------------------------------
-# Explosions and damage
+# Lifetime events and damage system
 
-struct TimedExplosion <: System end
-
-Overseer.requested_components(::TimedExplosion) = (SpatialComp,TimerComp,ExplosionComp,ExplosionDamageComp)
-
-function Overseer.update(::TimedExplosion, m::AbstractLedger)
-    spatial = m[SpatialComp]
-    timer = m[TimerComp]
-    explosion = m[ExplosionComp]
-    damage = m[ExplosionDamageComp]
-    for e in @entities_in(spatial && timer && explosion)
-        t = timer[e].time
-        ex = explosion[e]
-        r = t - ex.deadline
-        if r >= 0
-            position = spatial[e].position
-            for i=-r:r, j=-r:r
-                if abs(i) == r || abs(j) == r
-                    Entity(m, SpatialComp(position + VI[i,j], VI[0,0]),
-                           SpriteComp('💥', 50),
-                           TimerComp(),
-                           LifetimeComp(1),
-                           ExplosionDamageComp(),
-                          )
-                end
-            end
-            if r >= ex.radius
-                schedule_delete!(m, e)
-            end
-        end
-    end
-    delete_scheduled!(m)
-end
-
-# Sprites with finite lifetime
+# Entities with finite lifetime
 struct LifetimeUpdate <: System end
 
-Overseer.requested_components(::LifetimeUpdate) = (TimerComp,LifetimeComp)
+Overseer.requested_components(::LifetimeUpdate) = (TimerComp,LifetimeComp,SpatialComp)
 
-function Overseer.update(::LifetimeUpdate, m::AbstractLedger)
-    timer = m[TimerComp]
-    lifetime = m[LifetimeComp]
-    for e in @entities_in(timer && lifetime)
-        if timer[e].time > lifetime[e].max_age
-            schedule_delete!(m, e)
+function Overseer.update(::LifetimeUpdate, game::AbstractLedger)
+    death_action = game[DeathAction]
+    for e in @entities_in(game, TimerComp && LifetimeComp && SpatialComp)
+        if e.time > e.max_age
+            do_death(game, bare_entity(e), death_action, e.position)
         end
     end
-    delete_scheduled!(m)
+    delete_scheduled!(game)
 end
 
 
-# Spatially deleting entities
-struct EntityKillUpdate <: System end
-
-Overseer.requested_components(::EntityKillUpdate) = (SpatialComp,EntityKillerComp,HealthComp)
-
-function Overseer.update(::EntityKillUpdate, m::AbstractLedger)
-    spatial = m[SpatialComp]
-    killer_tag = m[EntityKillerComp]
-    killer_positions = Set{Vec2I}()
-    health = m[HealthComp]
-    sprite = m[SpriteComp]
-    for e in @entities_in(spatial && killer_tag)
-        pos = spatial[e].position
-        push!(killer_positions, pos)
-    end
-    for e in @entities_in(spatial)
-        if !(e in killer_tag) && (spatial[e].position in killer_positions)
-            if e in health
-                h = health[e].health
-                if h > 0
-                    health[e] = HealthComp(h - 5)
-                end
-            else
-                schedule_delete!(m, e)
-            end
-        end
-    end
-    delete_scheduled!(m)
-end
-
-# Spatially deleting entities
-struct ExplosionDamageUpdate <: System end
-
-Overseer.requested_components(::ExplosionDamageUpdate) = (SpatialComp,ExplosionDamageComp,ExplosiveReactionComp,HealthComp)
-
-function Overseer.update(::ExplosionDamageUpdate, m::AbstractLedger)
-    spatial = m[SpatialComp]
-    exp_damage = m[ExplosionDamageComp]
-    explosion_positions = Set{Vec2I}()
-    for e in @entities_in(spatial && exp_damage)
-        push!(explosion_positions, spatial[e].position)
-    end
-    reaction = m[ExplosiveReactionComp]
-    sprite = m[SpriteComp]
-    player_info = m[PlayerInfoComp]
-    health = m[HealthComp]
-    for e in @entities_in(spatial && !exp_damage)
-        pos = spatial[e].position
-        if pos in explosion_positions
-            r = e in reaction ? reaction[e].type : :disappear
-            if r === :disappear
-                schedule_delete!(m, e)
-            elseif r === :damage
-                # FIXME: Set movement disabled property?
-                if e in health
-                    # things which have health loose one health
-                    h = health[e].health - 1
-                    health[e] = HealthComp(h)
-                end
-            elseif r === :explode
-                for i=-1:1, j=-1:1
-                    Entity(m, SpatialComp(pos + VI[i,j], VI[0,0]),
-                           SpriteComp('💥', 50),
-                           TimerComp(),
-                           LifetimeComp(1),
-                           ExplosionDamageComp(),
-                          )
-                end
-                schedule_delete!(m, e)
-            elseif r === :none
-                # pass
-            else
-                error("Unrecognized explosion reaction property $r")
-            end
-        end
-    end
-    delete_scheduled!(m)
-end
-
+# Random entity spawning
 struct SpawnUpdate <: System end
 
-Overseer.requested_components(::SpawnUpdate) = (SpatialComp,SpawnerComp)
+Overseer.requested_components(::SpawnUpdate) = (SpatialComp,Spawner)
 
 function Overseer.update(::SpawnUpdate, game::AbstractLedger)
-    for spawner in @entities_in(game, SpatialComp && SpawnerComp)
+    for spawner in @entities_in(game, SpatialComp && Spawner)
         if rand() < spawner.spawn_probability
-            Entity(game,
-                   SpatialComp(spawner.position),
-                   spawner.spawn_prototype...
-            )
+            spawner.do_spawn(game, SpatialComp(spawner.position))
         end
     end
+end
+
+
+# Spatially-local damage system
+struct DamageUpdate <: System end
+
+Overseer.requested_components(::DamageUpdate) =
+    (SpatialComp,DamageDealer,HealthComp,DamageImmunity,DeathAction)
+
+function Overseer.update(::DamageUpdate, game::AbstractLedger)
+    # 1. Aggregate dealt damage per position on game board
+    explosion_damage = Dict{Vec2I,Int}()
+    bite_damage = Dict{Vec2I,Int}()
+    for e in @entities_in(game, SpatialComp && DamageDealer)
+        if has_flag(e.damage_type, EXPLOSION_DAMAGE)
+            explosion_damage[e.position] = get(explosion_damage, e.position, 0) + e.damage_amount
+        end
+        if has_flag(e.damage_type, BITE_DAMAGE)
+            bite_damage[e.position] = get(bite_damage, e.position, 0) + e.damage_amount
+        end
+    end
+
+    # 2. Deal damage to any entities at that position, unless they're immune to it
+    health = game[HealthComp]
+    damage_dealers = game[DamageDealer]
+    damage_immunity = game[DamageImmunity]
+    death_action = game[DeathAction]
+    player_info = game[PlayerInfoComp]
+    for e in @entities_in(game, SpatialComp)
+        # Damage occurring at this position
+        exp_dmg  = get(explosion_damage, e.position, 0)
+        bite_dmg = get(bite_damage, e.position, 0)
+        if exp_dmg == 0 && bite_dmg == 0
+            continue
+        end
+
+        # Compute immunity
+        immunity = NO_DAMAGE
+        if e in damage_immunity
+            immunity = damage_immunity[e].damage_immunity
+        elseif e in damage_dealers
+            # By default, damage dealers are immune to the type of damage they deal
+            immunity |= damage_dealers[e].damage_type
+        end
+
+        # Deal the damage
+        damage_amount = 0
+        if !has_flag(immunity, EXPLOSION_DAMAGE)
+            damage_amount += exp_dmg
+        end
+        if !has_flag(immunity, BITE_DAMAGE)
+            damage_amount += bite_dmg
+        end
+
+        is_dead = false
+        if e in health
+            h = max(-9, health[e].health - damage_amount)
+            health[e] = HealthComp(h)
+            is_dead = h <= 0
+        elseif damage_amount > 0
+            is_dead = true
+        end
+        if is_dead
+            do_death(game, bare_entity(e), death_action, e.position)
+        end
+    end
+    delete_scheduled!(game)
 end
 
 #-------------------------------------------------------------------------------
@@ -423,15 +433,7 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
             has_item = !isnothing(pop!(inventory[e].items, value))
 
             if value == '💣' && has_item
-                clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚")
-                time_bomb = Entity(m,
-                           SpatialComp(position, VI[0,0]),
-                           TimerComp(),
-                           SpriteComp('💣', 20),
-                           AnimatedSpriteComp(clocks),
-                           ExplosionComp(length(clocks), 2),
-                           ExplosiveReactionComp(:none)
-                          )
+                time_bomb = spawn_time_bomb(m, position)
                 if rand() < 0.05
                     # "Crazy bomb"
                     # 5 % chance of a randomly walking ticking bomb :-D

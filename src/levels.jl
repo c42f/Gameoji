@@ -11,6 +11,7 @@ module Emoji
     water_animals = collect("🐬🐳🐙🐊🐋🐟🐠🐡")
     buildings     = collect("🏰🏯🏪🏫🏬🏭🏥")
     monsters      = collect("👻👺👹👽🧟")
+    junkfood      = collect("🍔🍟🥤🍿🍕")
 end
 
 function rand_unoccupied_pos(board)
@@ -134,7 +135,13 @@ function overlay_board(func, board_size, background_chars, ledger, layout_str;
     delete_scheduled!(ledger)
 end
 
-function make_vault!(game, background)
+
+#-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# Functions for spawning game items
+
+
+function spawn_vault(game, background=reconstruct_background(game))
     layout = """
         ⬛⬛⬛⬛⬛⬛⬛⬛
         ⬛............⬛
@@ -155,7 +162,7 @@ function make_vault!(game, background)
             Entity(game.ledger, pos,
                    SpriteComp(c, 0),
                    CollisionComp(100),
-                   ExplosiveReactionComp(:none),
+                   DamageImmunity(ALL_DAMAGE)
                   )
         else
             Entity(game.ledger, pos,
@@ -165,7 +172,7 @@ function make_vault!(game, background)
     end
 end
 
-function make_exit!(game, background)
+function spawn_exit(game, background=reconstruct_background(game))
     layout = """
         ⬛⬛⬛⬛
         🚪🌀🌀⬛
@@ -177,7 +184,7 @@ function make_exit!(game, background)
             Entity(game.ledger, pos,
                    SpriteComp(c, 0),
                    CollisionComp(100),
-                   ExplosiveReactionComp(:none),
+                   DamageImmunity(ALL_DAMAGE),
                   )
         elseif c == '🌀'
             Entity(game.ledger, pos,
@@ -192,7 +199,7 @@ function make_exit!(game, background)
     end
 end
 
-function make_entry!(game, background)
+function spawn_entry(game, background)
     layout = """
         ⬛⬛⬛⬛
         x . . ⬛
@@ -216,7 +223,7 @@ function make_entry!(game, background)
             Entity(game.ledger, pos,
                    SpriteComp(c, 0),
                    CollisionComp(100),
-                   ExplosiveReactionComp(:none),
+                   DamageImmunity(ALL_DAMAGE),
                   )
         elseif c in '🚪'
             Entity(game.ledger, pos,
@@ -233,6 +240,90 @@ function make_entry!(game, background)
     game.start_positions = start_positions
 end
 
+function reconstruct_background(game)
+    background = fill(' ', game.board_size...)
+    for e in @entities_in(game, CollisionComp && SpatialComp && SpriteComp)
+        if e.mass >= 100 # assumed to be background/walls
+            pos = e.position
+            background[pos...] = e.icon
+        end
+    end
+    background
+end
+
+function spawn_bombs(game, num_bombs,
+        background_chars=reconstruct_background(game))
+    # Bombs which may be collected, but explode if there's an explosion
+    flood_fill!(game.ledger, background_chars,
+        rand_unoccupied_pos(background_chars),
+        num_bombs,
+        SpriteComp('💣', 1),
+        DamageImmunity(BITE_DAMAGE),
+        DeathAction(:explode),
+        CollectibleComp()
+    )
+end
+
+function spawn_time_bomb(game, position)
+    clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚")
+    Entity(game,
+        SpatialComp(position, VI[0,0]),
+        TimerComp(),
+        SpriteComp('💣', 20),
+        AnimatedSpriteComp(clocks),
+        LifetimeComp(length(clocks)),
+        DeathAction(:explode2),
+        DamageImmunity(ALL_DAMAGE)
+    )
+end
+
+function spawn_exploding_pineapples(game, number,
+        background_chars=reconstruct_background(game))
+    for _=1:number
+        seed_rand!(game.ledger, background_chars,
+            CollectibleComp(),
+            SpriteComp('🍍', 2),
+            TimerComp(),
+            LifetimeComp(rand(1:100)+rand(1:100)),
+            DeathAction(:explode)
+        )
+    end
+end
+
+function spawn_monsters(game, number,
+        background_chars=reconstruct_background(game);
+        icons=collect("👺👹"))
+    for _ in 1:number
+        seed_rand!(game.ledger, background_chars,
+            RandomVelocityControlComp(),
+            DamageDealer(BITE_DAMAGE, 5),
+            CollisionComp(1),
+            SpriteComp(rand(icons), 4)
+        )
+    end
+end
+
+function spawn_chickens(game, number,
+        background_chars=reconstruct_background(game))
+    for _=1:number
+        seed_rand!(game.ledger, background_chars,
+            BoidControlComp(),
+            SpriteComp('🐔', 10),
+            CollisionComp(1),
+            CollectibleComp(),
+            Spawner(  # chickens lay eggs which provide health
+                (SpriteComp('🥚', 10),
+                 CollectibleComp(),
+                 ItemHealthComp(1)),
+                0.0005
+            )
+        )
+    end
+end
+
+#-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# Level building
 function new_level!(game)
     game.level_num += 1
     game.visibility .= false
@@ -253,11 +344,11 @@ function new_level!(game)
     # Recreate the board, and place the players in it.
     background_chars = fill(' ', game.board_size...)
 
-    make_entry!(game, background_chars)
+    spawn_entry(game, background_chars)
     if rand() < 0.3
-        make_vault!(game, background_chars)
+        spawn_vault(game, background_chars)
     end
-    make_exit!(game, background_chars)
+    spawn_exit(game, background_chars)
 
     generate_maze!(background_chars)
 
@@ -288,22 +379,19 @@ function new_level!(game)
     =#
 
     # Flocking chickens
-    #boid_pos = rand_unoccupied_pos(background_chars)
     for _=1:30
         seed_rand!(game.ledger, background_chars,
-                   # SpatialComp(boid_pos, VI[rand(-1:1), rand(-1:1)]),
-                   #RandomVelocityControlComp(),
-                   BoidControlComp(),
-                   SpriteComp('🐔', 10),
-                   CollisionComp(1),
-                   CollectibleComp(),
-                   SpawnerComp(
-                       (SpriteComp('🥚', 10),
-                        CollectibleComp(),
-                        ItemHealthComp(1)),
-                       0.0005
-                   )
-                  )
+            BoidControlComp(),
+            SpriteComp('🐔', 10),
+            CollisionComp(1),
+            CollectibleComp(),
+            Spawner(  # chickens lay eggs which provide health
+                (SpriteComp('🥚', 10),
+                 CollectibleComp(),
+                 ItemHealthComp(1)),
+                0.0005
+            )
+        )
     end
 
     # Collectibles
@@ -320,6 +408,14 @@ function new_level!(game)
                    SpriteComp(rand(treasure), 2))
     end
 
+    # Poison spiders
+    for _=1:5
+        seed_rand!(game.ledger, background_chars,
+                   CollectibleComp(),
+                   DamageDealer(BITE_DAMAGE, 2),
+                   SpriteComp(spider, 2))
+    end
+
     # Health packs
     for _=1:2
         seed_rand!(game.ledger, background_chars,
@@ -333,43 +429,28 @@ function new_level!(game)
                    SpriteComp('💖', 3))
     end
 
-    monsters = collect("👺👹")
-    for _=1:2*(game.level_num-1)
-        seed_rand!(game.ledger, background_chars,
+    monster_icons=collect("👺👹")
+    spawn_monsters(game, 2*(game.level_num-1), background_chars; icons=monster_icons)
+
+    # A ghost monster which spawns monsters
+    seed_rand!(game.ledger, background_chars,
+        RandomVelocityControlComp(),
+        DamageImmunity(BITE_DAMAGE),
+        CollisionComp(1),
+        SpriteComp('👻', 4),
+        Spawner(0.001) do game, pos
+            Entity(game, pos,
                    RandomVelocityControlComp(),
-                   EntityKillerComp(),
+                   DamageDealer(BITE_DAMAGE, 5),
                    CollisionComp(1),
-                   SpriteComp(rand(monsters), 4))
-    end
+                   SpriteComp(rand(monster_icons), 4))
+        end
+    )
 
-    # Exploding pineapples
-    for _=1:5
-        seed_rand!(game.ledger, background_chars,
-                   CollectibleComp(),
-                   SpriteComp('🍍', 2),
-                   TimerComp(),
-                   ExplosionComp(rand(1:100)+rand(1:100), 1))
-    end
+    spawn_exploding_pineapples(game, 5, background_chars)
 
-    # FIXME: These seeding functions only see the walls, not the collectibles
-    # which already exist, but are in the ledger rather than the board.
-
-    # Bombs which may be collected, but explode if there's an explosion
-    #=
-    for _ = 1:length(background_chars)÷10
-        seed_rand!(game.ledger, background_chars,
-                   SpriteComp('💣', 1),
-                   ExplosiveReactionComp(:explode),
-                   CollectibleComp())
-    end
-    =#
-    # Bomb concentrations!
     for _=1:2
-        flood_fill!(game.ledger, background_chars, rand_unoccupied_pos(background_chars),
-                    length(background_chars) ÷ 20,
-                    SpriteComp('💣', 1),
-                    ExplosiveReactionComp(:explode),
-                    CollectibleComp())
+        spawn_bombs(game, length(background_chars) ÷ 20, background_chars)
     end
 
     position_players!(game)

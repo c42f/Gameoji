@@ -52,6 +52,9 @@ end
 const brick = '🧱'
 const cupcake = '🧁'
 const parrot = '🦜'
+const spider = '🕷'
+const bad_textwidth_emojis = (brick, cupcake, parrot, spider)
+
 const tree = '🌴'
 
 # Emoji should always be two characters wide, but gnome-terminal in ubuntu
@@ -62,7 +65,7 @@ function pad_emoji_string(str, expand_narrow_chars)
     io = IOBuffer()
     for c in str
         print(io, c)
-        if (expand_narrow_chars && textwidth(c) == 1) || c in (cupcake, brick, parrot)
+        if (expand_narrow_chars && textwidth(c) == 1) || c in bad_textwidth_emojis
             if c == '░'
                 print(io, c)
             else

@@ -44,9 +44,8 @@ function gameoji_ledger()
         Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerControlUpdate()]),
         Stage(:dynamics, [PositionUpdate()]),
         Stage(:dynamics_post, [TimerUpdate()]),
-        Stage(:lifetime, [InventoryCollectionUpdate(), LifetimeUpdate(),
-                          TimedExplosion(), ExplosionDamageUpdate(), EntityKillUpdate(),
-                          SpawnUpdate()]),
+        Stage(:lifetime, [DamageUpdate(), InventoryCollectionUpdate(),
+                          LifetimeUpdate(), SpawnUpdate()]),
         Stage(:new_level, [NewLevelUpdate()]),
         Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
     )
@@ -78,20 +77,47 @@ include("players.jl")
 include("maze_levels.jl")
 include("client_server.jl")
 
+dev_mode = false
 
 # The main game update loop
 function game_loop(game, event_channel)
     while true
         Base.invokelatest() do
-            reset!(game)
-            new_level!(game)
+            try
+                reset!(game)
+                new_level!(game)
+            catch
+                if dev_mode
+                    @error "Level creation failed" exception=current_exceptions()
+                else
+                    rethrow()
+                end
+            end
         end
         game.is_paused = false
         clear_screen(stdout)
         while isopen(event_channel)
             if !game.is_paused
                 # Allow live code modification
-                Base.invokelatest(update, game)
+                Base.invokelatest() do
+                    # Use our own update loop here so we can add in a try-catch
+                    # for development mode.
+                    for (stage_name,systems) in stages(game)
+                        for system in systems
+                            try
+                                update(system, game)
+                            catch exc
+                                global dev_mode
+                                if dev_mode
+                                    @error("Exception running system update",
+                                           system, exception=current_exceptions())
+                                else
+                                    rethrow()
+                                end
+                            end
+                        end
+                    end
+                end
             end
             (event_type,value) = take!(event_channel)
             @debug "Read event" event_type value
