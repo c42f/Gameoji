@@ -430,8 +430,8 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
         elseif action == :use_item
             # TODO: Should we use the returned entity in some way rather than
             # reconstructing it?
-            has_item = !isnothing(pop!(inventory[e].items, value))
-
+            has_item = haskey(inventory[e].items, value)
+            used_item = false
             if value == '💣' && has_item
                 time_bomb = spawn_time_bomb(m, position)
                 if rand() < 0.05
@@ -439,15 +439,19 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
                     # 5 % chance of a randomly walking ticking bomb :-D
                     m[time_bomb] = RandomVelocityControlComp()
                 end
+                used_item = true
             elseif value == '💠' && has_item
                 # Player healing other player.
-                # TODO: Move this out to be a more generic effect in its own system?
                 for other_e in @entities_in(game, SpatialComp && PlayerInfoComp && HealthComp)
                     if other_e.position == position && bare_entity(other_e) != bare_entity(e)
                         health[other_e] = HealthComp(other_e.health + 5)
+                        used_item = true
                         break
                     end
                 end
+            end
+            if used_item
+                pop!(inventory[e].items, value)
             end
         end
         spatial[e] = SpatialComp(position, velocity)

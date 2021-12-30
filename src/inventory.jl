@@ -13,6 +13,7 @@ function _find_by_icon(items::Items, c::Char)
 end
 
 Base.haskey(items::Items, c::Char) = !isnothing(_find_by_icon(items, c))
+Base.getindex(items::Items, c::Char) = _find_by_icon(items, c)
 
 Base.push!(items::Items, e::Entity) = push!(items.es, e)
 
