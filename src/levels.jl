@@ -152,7 +152,7 @@ function spawn_vault(game, background=reconstruct_background(game))
         ⬛⬛⬛🚪⬛⬛⬛⬛"""
 
     overlay_board(game.board_size, background, game.ledger, layout) do pos, c
-        treasure = "💠💰💎"
+        treasure = "💠💰🔨"
         if c == '.'
             Entity(game.ledger, pos,
                    SpriteComp(rand(treasure), 2),

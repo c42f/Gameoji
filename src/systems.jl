@@ -423,6 +423,7 @@ Overseer.requested_components(::PlayerControlUpdate) = (SpatialComp, PlayerContr
 
 function Overseer.update(::PlayerControlUpdate, game::AbstractLedger)
     spatial = game[SpatialComp]
+    health = game[HealthComp]
     for e in @entities_in(game, SpatialComp && PlayerControlComp &&
                           SpriteComp && InventoryComp && HealthComp)
         position = e.position
@@ -448,7 +449,7 @@ function Overseer.update(::PlayerControlUpdate, game::AbstractLedger)
                     game[time_bomb] = RandomVelocityControlComp()
                 end
                 used_item = true
-            elseif value == '💠' # && has_item
+            elseif value == '💠' && has_item
                 # Player healing other player.
                 for other_e in @entities_in(game, SpatialComp && PlayerInfoComp && HealthComp)
                     if other_e.position == position && bare_entity(other_e) != bare_entity(e)
@@ -457,18 +458,18 @@ function Overseer.update(::PlayerControlUpdate, game::AbstractLedger)
                         break
                     end
                 end
-                #=
-                # TODO: Way to select secondary action key
-                # Spawn doors
+            elseif value == '🔨' && has_item
+                # Spawn bricks
+                # TODO: Way to select a secondary action hotkey
                 Entity(game.ledger,
-                       SpatialComp(e.position),
-                       SpriteComp('🚪', 0),
-                       CollisionComp(100, DOOR_COLLIDE),
-                      )
-                =#
+                    SpatialComp(e.position),
+                    SpriteComp(brick, 0),
+                    CollisionComp(100, WALL_COLLIDE),
+                )
+                used_item = true
             end
             if used_item
-                pop!(inventory[e].items, value)
+                pop!(e.items, value)
             end
         end
         spatial[e] = SpatialComp(position, velocity)

@@ -5,7 +5,8 @@ right_keys = Dict(
     ARROW_LEFT =>(:move, VI[-1,0]),
     ARROW_RIGHT=>(:move, VI[1, 0]),
     '0'        =>(:use_item, '💣'),
-    '9'        =>(:use_item, '💠'))
+    '-'        =>(:use_item, '🔨'),
+    '='        =>(:use_item, '💠'))
 
 left_keys = Dict(
     'w'=>(:move, VI[0, 1]),
@@ -13,7 +14,8 @@ left_keys = Dict(
     'a'=>(:move, VI[-1,0]),
     'd'=>(:move, VI[1, 0]),
     '1'=>(:use_item, '💣'),
-    '2'=>(:use_item, '💠'))
+    '2'=>(:use_item, '🔨'),
+    '3'=>(:use_item, '💠'))
 
 middle_keys = Dict(
     'i'=>(:move, VI[0, 1]),
@@ -21,7 +23,8 @@ middle_keys = Dict(
     'j'=>(:move, VI[-1,0]),
     'l'=>(:move, VI[1, 0]),
     '5'=>(:use_item, '💣'),
-    '6'=>(:use_item, '💠'))
+    '6'=>(:use_item, '🔨'),
+    '7'=>(:use_item, '💠'))
 
 function join_player!(game, screen_number, icon, keymap)
     push!(game.joined_players, (screen_number, icon, keymap))
