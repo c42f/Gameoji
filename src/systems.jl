@@ -13,9 +13,17 @@ end
 
 SpatialComp(position::Vec2I) = SpatialComp(position, VI[0,0])
 
+const CollideFlags = UInt8
+const WALL_COLLIDE = CollideFlags(1<<0)
+const DOOR_COLLIDE = CollideFlags(1<<1)
+const ALL_COLLIDE  = CollideFlags(0xff)
+
 @component struct CollisionComp
     mass::Int
+    collide_flags::CollideFlags
 end
+
+CollisionComp(mass::Integer) = CollisionComp(mass, ALL_COLLIDE)
 
 @component struct SpriteComp
     icon::Char
@@ -174,28 +182,33 @@ struct PositionUpdate <: System end
 
 Overseer.requested_components(::PositionUpdate) = (SpatialComp,CollisionComp)
 
-function Overseer.update(::PositionUpdate, m::AbstractLedger)
-    spatial = m[SpatialComp]
-    collision = m[CollisionComp]
-
-    collidables = collect(@entities_in(spatial && collision))
-
-    max_mass = fill(0, m.board_size...)
-    for obj in collidables
-        pos = spatial[obj].position
-        mass = collision[obj].mass
-        if max_mass[pos...] < mass
-            max_mass[pos...] = mass
+function Overseer.update(::PositionUpdate, game::AbstractLedger)
+    # Collision flags - a collision is only considered when at least one flag
+    # of the colliers matche.
+    collide_flags = fill(CollideFlags(0), game.board_size...)
+    # Maxium "mass" at game positions, for any collision flags (this is
+    # slightly inconsistent as it aggreates across flags, but seems harmless
+    # enough for the moment.)
+    max_mass = fill(0, game.board_size...)
+    for obj in @entities_in(game, SpatialComp && CollisionComp)
+        p = obj.position
+        m = obj.mass
+        if max_mass[p...] < m
+            max_mass[p...] = m
         end
+        collide_flags[p...] |= obj.collide_flags
     end
 
-    for obj in collidables
-        pos = spatial[obj].position
-        new_pos = pos + spatial[obj].velocity
-        obj_mass = collision[obj].mass
-        if #==# new_pos[1] < 1 || m.board_size[1] < new_pos[1] ||
-                new_pos[2] < 1 || m.board_size[2] < new_pos[2] ||
+    spatial = game[SpatialComp]
+
+    for obj in @entities_in(game, SpatialComp && CollisionComp)
+        pos = obj.position
+        new_pos = pos + obj.velocity
+        obj_mass = obj.mass
+        if #==# new_pos[1] < 1 || game.board_size[1] < new_pos[1] ||
+                new_pos[2] < 1 || game.board_size[2] < new_pos[2] ||
                 (max_mass[new_pos...] > obj_mass &&
+                 collide_flags[new_pos...] & obj.collide_flags != 0 && 
                  max_mass[pos...] >= obj_mass)
                 # ^^ Allows us to get unstuck if we're in the wall 😬
             # Inelastic collision with walls / border
@@ -203,9 +216,8 @@ function Overseer.update(::PositionUpdate, m::AbstractLedger)
         end
     end
 
-    for e in @entities_in(spatial)
-        s = spatial[e]
-        spatial[e] = SpatialComp(s.position + s.velocity, s.velocity)
+    for e in @entities_in(game, SpatialComp)
+        spatial[e] = SpatialComp(e.position + e.velocity, e.velocity)
     end
 end
 
@@ -409,38 +421,34 @@ struct PlayerControlUpdate <: System end
 
 Overseer.requested_components(::PlayerControlUpdate) = (SpatialComp, PlayerControlComp, SpriteComp, InventoryComp, PlayerInfoComp)
 
-function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
-    spatial = m[SpatialComp]
-    controls = m[PlayerControlComp]
-    sprite = m[SpriteComp]
-    health = m[HealthComp]
-    inventory = m[InventoryComp]
-    player_info = m[PlayerInfoComp]
-    for e in @entities_in(spatial && controls && sprite && inventory && health)
-        position = spatial[e].position
+function Overseer.update(::PlayerControlUpdate, game::AbstractLedger)
+    spatial = game[SpatialComp]
+    for e in @entities_in(game, SpatialComp && PlayerControlComp &&
+                          SpriteComp && InventoryComp && HealthComp)
+        position = e.position
         velocity = VI[0,0]
-        if health[e].health <= 0
+        if e.health <= 0
             # Player is dead and can't move!
             spatial[e] = SpatialComp(position, velocity)
             continue
         end
-        action,value = get(controls[e].keymap, m.input_key, (:none,nothing))
+        action,value = get(e.keymap, game.input_key, (:none,nothing))
         if action === :move
             velocity = value
         elseif action == :use_item
             # TODO: Should we use the returned entity in some way rather than
             # reconstructing it?
-            has_item = haskey(inventory[e].items, value)
+            has_item = haskey(e.items, value)
             used_item = false
             if value == '💣' && has_item
-                time_bomb = spawn_time_bomb(m, position)
+                time_bomb = spawn_time_bomb(game, position)
                 if rand() < 0.05
                     # "Crazy bomb"
                     # 5 % chance of a randomly walking ticking bomb :-D
-                    m[time_bomb] = RandomVelocityControlComp()
+                    game[time_bomb] = RandomVelocityControlComp()
                 end
                 used_item = true
-            elseif value == '💠' && has_item
+            elseif value == '💠' # && has_item
                 # Player healing other player.
                 for other_e in @entities_in(game, SpatialComp && PlayerInfoComp && HealthComp)
                     if other_e.position == position && bare_entity(other_e) != bare_entity(e)
@@ -449,6 +457,15 @@ function Overseer.update(::PlayerControlUpdate, m::AbstractLedger)
                         break
                     end
                 end
+                #=
+                # TODO: Way to select secondary action key
+                # Spawn doors
+                Entity(game.ledger,
+                       SpatialComp(e.position),
+                       SpriteComp('🚪', 0),
+                       CollisionComp(100, DOOR_COLLIDE),
+                      )
+                =#
             end
             if used_item
                 pop!(inventory[e].items, value)

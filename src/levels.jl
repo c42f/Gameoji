@@ -161,8 +161,13 @@ function spawn_vault(game, background=reconstruct_background(game))
         elseif c == '⬛'
             Entity(game.ledger, pos,
                    SpriteComp(c, 0),
-                   CollisionComp(100),
+                   CollisionComp(100, WALL_COLLIDE),
                    DamageImmunity(ALL_DAMAGE)
+                  )
+        elseif c == '🚪'
+            Entity(game.ledger, pos,
+                   SpriteComp(c, 0),
+                   CollisionComp(100, DOOR_COLLIDE),
                   )
         else
             Entity(game.ledger, pos,
@@ -185,6 +190,11 @@ function spawn_exit(game, background=reconstruct_background(game))
                    SpriteComp(c, 0),
                    CollisionComp(100),
                    DamageImmunity(ALL_DAMAGE),
+                  )
+        elseif c == '🚪'
+            Entity(game.ledger, pos,
+                   SpriteComp(c, 0),
+                   CollisionComp(100, DOOR_COLLIDE),
                   )
         elseif c == '🌀'
             Entity(game.ledger, pos,
@@ -226,9 +236,10 @@ function spawn_entry(game, background)
                    CollisionComp(100),
                    DamageImmunity(ALL_DAMAGE),
                   )
-        elseif c in '🚪'
+        elseif c == '🚪'
             Entity(game.ledger, pos,
                    SpriteComp(c, 0),
+                   CollisionComp(100, DOOR_COLLIDE),
                   )
         else
         end
@@ -287,6 +298,27 @@ function spawn_exploding_pineapples(game, number,
             TimerComp(),
             LifetimeComp(rand(1:100)+rand(1:100)),
             DeathAction(:explode)
+        )
+    end
+end
+
+function spawn_ghosts(game, number,
+        background_chars=reconstruct_background(game);
+        monster_icons=collect("👺👹"))
+    for _ = 1:number
+        # A ghost monster which spawns monsters
+        seed_rand!(game.ledger, background_chars,
+            RandomVelocityControlComp(),
+            DamageImmunity(BITE_DAMAGE),
+            CollisionComp(1),
+            SpriteComp('👻', 4),
+            Spawner(0.001) do game, pos
+                Entity(game, pos,
+                       RandomVelocityControlComp(),
+                       DamageDealer(BITE_DAMAGE, 5),
+                       CollisionComp(1),
+                       SpriteComp(rand(monster_icons), 4))
+            end
         )
     end
 end
@@ -437,20 +469,7 @@ function new_level!(game)
     monster_icons=collect("👺👹")
     spawn_monsters(game, 2*(game.level_num-1), background_chars; icons=monster_icons)
 
-    # A ghost monster which spawns monsters
-    seed_rand!(game.ledger, background_chars,
-        RandomVelocityControlComp(),
-        DamageImmunity(BITE_DAMAGE),
-        CollisionComp(1),
-        SpriteComp('👻', 4),
-        Spawner(0.001) do game, pos
-            Entity(game, pos,
-                   RandomVelocityControlComp(),
-                   DamageDealer(BITE_DAMAGE, 5),
-                   CollisionComp(1),
-                   SpriteComp(rand(monster_icons), 4))
-        end
-    )
+    spawn_ghosts(game, 1; monster_icons)
 
     spawn_exploding_pineapples(game, 5, background_chars)
 
