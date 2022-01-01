@@ -22,12 +22,6 @@ function find_icons(game, icon, component)
     es
 end
 
-function set_god_mode(e)
-    # FIXME
-    # pop!(collision, e)
-    # entity_killer[e] = EntityKillerComp()
-end
-
 function spawn_collectibles(game, emojis, number)
     background = reconstruct_background(game)
     if number > prod(game.board_size)

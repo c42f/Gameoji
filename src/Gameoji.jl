@@ -43,13 +43,29 @@ end
 
 function gameoji_ledger()
     Ledger(
-        Stage(:control, [RandomVelocityUpdate(), BoidVelocityUpdate(), PlayerControlUpdate()]),
-        Stage(:dynamics, [PositionUpdate()]),
-        Stage(:dynamics_post, [TimerUpdate()]),
-        Stage(:lifetime, [DamageUpdate(), InventoryCollectionUpdate(),
-                          LifetimeUpdate(), SpawnUpdate()]),
-        Stage(:new_level, [NewLevelUpdate()]),
-        Stage(:rendering, [AnimatedSpriteUpdate(), TerminalRenderer()]),
+        Stage(:control, [
+            RandomVelocityUpdate(),
+            BoidVelocityUpdate(),
+            PlayerControlUpdate()
+        ]),
+        Stage(:dynamics, [
+            PositionUpdate(),
+            TimerUpdate()
+        ]),
+        Stage(:lifetime, [
+            InventoryCollectionUpdate(),
+            DamageUpdate(),
+            LifetimeUpdate(),
+            SpawnUpdate(),
+            DeathActionUpdate()
+        ]),
+        Stage(:new_level, [
+            NewLevelUpdate()
+        ]),
+        Stage(:rendering, [
+            AnimatedSpriteUpdate(),
+            TerminalRenderer()
+        ]),
     )
 end
 
@@ -79,7 +95,7 @@ include("players.jl")
 include("maze_levels.jl")
 include("client_server.jl")
 
-dev_mode = false
+dev_mode = true
 
 # The main game update loop
 function game_loop(game, event_channel)

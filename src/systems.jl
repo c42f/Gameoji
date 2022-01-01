@@ -93,44 +93,12 @@ end
     damage_immunity::DamageFlag
 end
 
+@component struct IsDead
+end
+
 # Reaction to dying
 @component struct DeathAction
     death_action::Union{Symbol,Function}
-end
-
-function do_death(game, e, death_action, position)
-    if e in death_action
-        action = death_action[e].death_action
-        if action isa Symbol
-            # Hardcoded actions for dispatch efficiency
-            if action === :explode || action === :explode2
-                r = (action === :explode) ? 1 : 2
-                for i in -r:r, j in -r:r
-                    Entity(game,
-                        SpatialComp(position + VI[i,j], VI[0,0]),
-                        SpriteComp('💥', 50),
-                        TimerComp(),
-                        LifetimeComp(1),
-                        DamageDealer(EXPLOSION_DAMAGE, 1),
-                        DamageImmunity(ALL_DAMAGE),
-                    )
-                end
-                schedule_delete!(game, e)
-            elseif action == :nothing
-                # pass
-            else
-                @warn "Unknown death action: $action"
-            end
-        else
-            # Any other arbitrary action for generality
-            action(game, e, position)
-        end
-    else
-        schedule_delete!(game, e)
-    end
-end
-
-@component struct EntityKillerComp
 end
 
 @component struct LifetimeComp
@@ -321,16 +289,15 @@ end
 # Entities with finite lifetime
 struct LifetimeUpdate <: System end
 
-Overseer.requested_components(::LifetimeUpdate) = (TimerComp,LifetimeComp,SpatialComp)
+Overseer.requested_components(::LifetimeUpdate) = (TimerComp,LifetimeComp,IsDead)
 
 function Overseer.update(::LifetimeUpdate, game::AbstractLedger)
-    death_action = game[DeathAction]
-    for e in @entities_in(game, TimerComp && LifetimeComp && SpatialComp)
+    is_dead = game[IsDead]
+    for e in @entities_in(game, TimerComp && LifetimeComp)
         if e.time > e.max_age
-            do_death(game, bare_entity(e), death_action, e.position)
+            is_dead[e] = IsDead()
         end
     end
-    delete_scheduled!(game)
 end
 
 
@@ -352,7 +319,7 @@ end
 struct DamageUpdate <: System end
 
 Overseer.requested_components(::DamageUpdate) =
-    (SpatialComp,DamageDealer,HealthComp,DamageImmunity,DeathAction)
+    (SpatialComp,DamageDealer,HealthComp,DamageImmunity,IsDead)
 
 function Overseer.update(::DamageUpdate, game::AbstractLedger)
     # 1. Aggregate dealt damage per position on game board
@@ -371,7 +338,7 @@ function Overseer.update(::DamageUpdate, game::AbstractLedger)
     health = game[HealthComp]
     damage_dealers = game[DamageDealer]
     damage_immunity = game[DamageImmunity]
-    death_action = game[DeathAction]
+    is_dead = game[IsDead]
     player_info = game[PlayerInfoComp]
     for e in @entities_in(game, SpatialComp)
         # Damage occurring at this position
@@ -399,17 +366,59 @@ function Overseer.update(::DamageUpdate, game::AbstractLedger)
             damage_amount += bite_dmg
         end
 
-        is_dead = false
         if e in health
             h = max(-9, health[e].health - damage_amount)
             health[e] = HealthComp(h)
-            is_dead = h <= 0
+            if h <= 0
+                is_dead[e] = IsDead()
+            end
         elseif damage_amount > 0
-            is_dead = true
+            is_dead[e] = IsDead()
         end
-        if is_dead
-            do_death(game, bare_entity(e), death_action, e.position)
+    end
+end
+
+
+struct DeathActionUpdate <: System end
+
+Overseer.requested_components(::DeathActionUpdate) = (SpatialComp,DeathAction,IsDead)
+
+function Overseer.update(::DeathActionUpdate, game::AbstractLedger)
+    # Dead objects with a DeathAction are handled here
+    to_preserve = Entity[]
+    for obj in @entities_in(game, IsDead && SpatialComp && DeathAction)
+        action = obj.death_action
+        if action isa Symbol
+            # Hardcoded actions for dispatch efficiency
+            if action === :explode || action === :explode2
+                r = (action === :explode) ? 1 : 2
+                for i in -r:r, j in -r:r
+                    Entity(game,
+                        SpatialComp(obj.position + VI[i,j], VI[0,0]),
+                        SpriteComp('💥', 50),
+                        TimerComp(),
+                        LifetimeComp(1),
+                        DamageDealer(EXPLOSION_DAMAGE, 1),
+                        DamageImmunity(ALL_DAMAGE),
+                    )
+                end
+                schedule_delete!(game, obj)
+            elseif action == :nothing
+                push!(to_preserve, bare_entity(obj))
+            else
+                @warn "Unknown death action: $action"
+            end
+        else
+            # Any other arbitrary action for generality
+            action(game, obj, obj.position)
         end
+    end
+    delete!(game[IsDead], to_preserve)
+    delete_scheduled!(game)
+
+    # Other dead objects are just deleted by default
+    for obj in @entities_in(game, IsDead)
+        schedule_delete!(game, obj)
     end
     delete_scheduled!(game)
 end
@@ -577,7 +586,7 @@ function Overseer.update(::TerminalRenderer, game::AbstractLedger)
     health = game[HealthComp]
     drawables = [(spatial=spatial_comp[e],
                   sprite=sprite_comp[e],
-                  is_dead=(e in health) ? health[e].health <= 0 : false,
+                  no_health=(e in health) ? health[e].health <= 0 : false,
                   id=e.id)
                  for e in @entities_in(spatial_comp && sprite_comp)]
     sort!(drawables, by=obj->(obj.sprite.draw_priority, obj.id))
@@ -586,7 +595,7 @@ function Overseer.update(::TerminalRenderer, game::AbstractLedger)
     for obj in drawables
         pos = obj.spatial.position
         if 1 <= pos[1] <= game.board_size[1] && 1 <= pos[2] <= game.board_size[2]
-            board[pos...] = obj.is_dead ? '💀' : obj.sprite.icon
+            board[pos...] = obj.no_health ? '💀' : obj.sprite.icon
         end
     end
     # Update visibility mask
