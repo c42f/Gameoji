@@ -54,6 +54,7 @@ function gameoji_ledger()
         ]),
         Stage(:lifetime, [
             InventoryCollectionUpdate(),
+            ProximityFuseUpdate(),
             DamageUpdate(),
             LifetimeUpdate(),
             SpawnUpdate(),

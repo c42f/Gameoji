@@ -11,6 +11,13 @@ TimerComp() = TimerComp(0)
     velocity::Vec2I
 end
 
+# Direction that the sprite is "facing"
+@component struct Orientation
+    orientation::Vec2I
+end
+
+Orientation() = Orientation(VI[1,0])
+
 SpatialComp(position::Vec2I) = SpatialComp(position, VI[0,0])
 
 const CollideFlags = UInt8
@@ -21,6 +28,10 @@ const ALL_COLLIDE  = CollideFlags(0xff)
 @component struct CollisionComp
     mass::Int
     collide_flags::CollideFlags
+end
+
+@component struct ProximityFuse
+    proximity_radius::Int
 end
 
 CollisionComp(mass::Integer) = CollisionComp(mass, ALL_COLLIDE)
@@ -122,8 +133,13 @@ function Spawner(components::Tuple, probability)
     end
 end
 
+
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
+
+function outside_board(game, pos)
+    pos[1] < 1 || pos[1] > game.board_size[1] || pos[2] < 1 || pos[2] > game.board_size[2]
+end
 
 # Systems
 
@@ -148,7 +164,7 @@ end
 
 struct PositionUpdate <: System end
 
-Overseer.requested_components(::PositionUpdate) = (SpatialComp,CollisionComp)
+Overseer.requested_components(::PositionUpdate) = (SpatialComp,CollisionComp,Orientation)
 
 function Overseer.update(::PositionUpdate, game::AbstractLedger)
     # Collision flags - a collision is only considered when at least one flag
@@ -168,6 +184,13 @@ function Overseer.update(::PositionUpdate, game::AbstractLedger)
     end
 
     spatial = game[SpatialComp]
+
+    orientation = game[Orientation]
+    for obj in @entities_in(game, SpatialComp && Orientation)
+        if obj.velocity != VI[0,0]
+            orientation[obj] = Orientation(round.(Int, normalize(obj.velocity)))
+        end
+    end
 
     for obj in @entities_in(game, SpatialComp && CollisionComp)
         pos = obj.position
@@ -300,6 +323,28 @@ function Overseer.update(::LifetimeUpdate, game::AbstractLedger)
     end
 end
 
+struct ProximityFuseUpdate <: System end
+
+Overseer.requested_components(::ProximityFuseUpdate) = (ProximityFuse,SpatialComp,CollisionComp,IsDead)
+
+function Overseer.update(::ProximityFuseUpdate, game::AbstractLedger)
+    object_presence = Set{Vec2I}()
+    proxy_fuse = game[ProximityFuse]
+    for e in @entities_in(game, SpatialComp && CollisionComp)
+        # Overseer Bug? Can't use @entities_in(game, SpatialComp && !ProximityFuse)
+        if !(e in proxy_fuse)
+            push!(object_presence, e.position)
+        end
+    end
+
+    is_dead = game[IsDead]
+    for e in @entities_in(game, SpatialComp && ProximityFuse)
+        if e.position in object_presence || outside_board(game, e.position)
+            is_dead[e] = IsDead()
+        end
+    end
+end
+
 
 # Random entity spawning
 struct SpawnUpdate <: System end
@@ -417,7 +462,9 @@ function Overseer.update(::DeathActionUpdate, game::AbstractLedger)
     delete_scheduled!(game)
 
     # Other dead objects are just deleted by default
-    for obj in @entities_in(game, IsDead)
+    # Hack: Don't delete objects which aren't on the board, because they might
+    # be referenced in the player's inventories.
+    for obj in @entities_in(game, IsDead && SpatialComp)
         schedule_delete!(game, obj)
     end
     delete_scheduled!(game)
@@ -428,13 +475,13 @@ end
 
 struct PlayerControlUpdate <: System end
 
-Overseer.requested_components(::PlayerControlUpdate) = (SpatialComp, PlayerControlComp, SpriteComp, InventoryComp, PlayerInfoComp)
+Overseer.requested_components(::PlayerControlUpdate) = (SpatialComp, PlayerControlComp, SpriteComp, InventoryComp, PlayerInfoComp, Orientation)
 
 function Overseer.update(::PlayerControlUpdate, game::AbstractLedger)
     spatial = game[SpatialComp]
     health = game[HealthComp]
     for e in @entities_in(game, SpatialComp && PlayerControlComp &&
-                          SpriteComp && InventoryComp && HealthComp)
+                          SpriteComp && InventoryComp && HealthComp && Orientation)
         position = e.position
         velocity = VI[0,0]
         if e.health <= 0
@@ -468,14 +515,27 @@ function Overseer.update(::PlayerControlUpdate, game::AbstractLedger)
                     end
                 end
             elseif value == '🔨' && has_item
-                # Spawn bricks
                 # TODO: Way to select a secondary action hotkey
+                #=
+                # Spawn bricks
                 Entity(game.ledger,
                     SpatialComp(e.position),
                     SpriteComp(brick, 0),
                     CollisionComp(100, WALL_COLLIDE),
                 )
-                used_item = true
+                =#
+                # Spawn rockets
+                v = e.orientation
+                if v != VI[0,0]
+                    Entity(game.ledger,
+                        SpatialComp(e.position, v),
+                        SpriteComp('🚀', 0),
+                        ProximityFuse(1),
+                        DamageImmunity(ALL_DAMAGE),
+                        DeathAction(:explode2)
+                    )
+                    used_item = true
+                end
             end
             if used_item
                 pop!(e.items, value)

@@ -63,6 +63,7 @@ function create_player!(game, screen_number, icon, keymap)
         HealthComp(5),
         SpriteComp(icon, 1000),
         CollisionComp(1, WALL_COLLIDE),
+        Orientation(),
         DeathAction(:nothing),
     )
 end
