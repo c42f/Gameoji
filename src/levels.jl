@@ -383,7 +383,7 @@ function new_level!(game)
     end
     spawn_exit(game, background_chars)
 
-    generate_maze!(background_chars)
+    #generate_maze!(background_chars)
 
     # Convert maze board into entities
     for i in 1:game.board_size[1]

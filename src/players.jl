@@ -70,10 +70,15 @@ end
 
 function position_players!(game, players)
     spatial = game.ledger[SpatialComp]
+    ps = collect(players)
+    length(ps) > 0 && (spatial[ps[1]] = SpatialComp(VI[1,1]))
+    length(ps) > 1 && (spatial[ps[2]] = SpatialComp(game.board_size))
+    #=
     for (i,player) in enumerate(players)
         pos = game.start_positions[mod1(i, length(game.start_positions))]
         spatial[player] = SpatialComp(pos, VI[0,0])
     end
+    =#
 end
 
 function position_players!(game)

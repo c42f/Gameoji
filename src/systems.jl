@@ -497,7 +497,19 @@ function Overseer.update(::PlayerControlUpdate, game::AbstractLedger)
             # reconstructing it?
             has_item = haskey(e.items, value)
             used_item = false
-            if value == '💣' && has_item
+            if value == '💣' #&& has_item
+                v = e.orientation
+                if v != VI[0,0]
+                    Entity(game.ledger,
+                        SpatialComp(e.position, v),
+                        SpriteComp('🚀', 0),
+                        ProximityFuse(1),
+                        DamageImmunity(ALL_DAMAGE),
+                        DeathAction(:explode2)
+                    )
+                    used_item = true
+                end
+                #=
                 time_bomb = spawn_time_bomb(game, position)
                 if rand() < 0.05
                     # "Crazy bomb"
@@ -505,6 +517,7 @@ function Overseer.update(::PlayerControlUpdate, game::AbstractLedger)
                     game[time_bomb] = RandomVelocityControlComp()
                 end
                 used_item = true
+                =#
             elseif value == '💠' && has_item
                 # Player healing other player.
                 for other_e in @entities_in(game, SpatialComp && PlayerInfoComp && HealthComp)
