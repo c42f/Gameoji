@@ -276,6 +276,17 @@ function spawn_bombs(game, num_bombs,
     )
 end
 
+function spawn_hammers(game, number,
+                       background_chars=reconstruct_background(game))
+    flood_fill!(game.ledger, background_chars,
+        rand_unoccupied_pos(background_chars),
+        number,
+        SpriteComp('🔨', 1),
+        DamageImmunity(BITE_DAMAGE),
+        CollectibleComp()
+    )
+end
+
 function spawn_time_bomb(game, position)
     clocks = collect("🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚")
     Entity(game,
@@ -474,8 +485,10 @@ function new_level!(game)
     spawn_exploding_pineapples(game, 5, background_chars)
 
     for _=1:2
-        spawn_bombs(game, length(background_chars) ÷ 20, background_chars)
+        spawn_bombs(game, length(background_chars) ÷ 30, background_chars)
     end
+
+    spawn_hammers(game, length(background_chars) ÷ 30, background_chars)
 
     position_players!(game)
 
