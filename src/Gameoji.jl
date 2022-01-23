@@ -180,7 +180,7 @@ function run_game(player_icons)
                     # Live code modification via RemoteREPL
                     repl_server = listen(Sockets.localhost, 27754)
                     @async begin
-                        serve_repl(repl_server)
+                        serve_repl(repl_server, on_client_connect=sess->sess.in_module=Gameoji)
                     end
                 catch exc
                     @error "Failed to set up REPL server" exception=(exc,catch_backtrace())
