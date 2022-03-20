@@ -169,7 +169,7 @@ function game_loop(game, event_channel)
     end
 end
 
-function run_game(player_icons)
+function run_game(player_info)
     term = TerminalMenus.terminal
     open("log.txt", "w") do logio
         with_logger(ConsoleLogger(IOContext(logio, :color=>true))) do
@@ -188,7 +188,7 @@ function run_game(player_icons)
                 # Use global Game object for access from RemoteREPL.jl
                 tsize = term_size(term)
                 global game = Game(term, tsize,
-                                   max_board_size(tsize, length(player_icons)))
+                                   max_board_size(tsize, length(player_info)))
                 event_channel = Channel()
                 try
                     # Game server for local players to join with keyboards from
@@ -234,7 +234,7 @@ function run_game(player_icons)
                         # otherwise we miss events (??)
                         try
                             main_keyboard_id = add_keyboard(game)
-                            join_players!(game, player_icons, main_keyboard_id,
+                            join_players!(game, player_info, main_keyboard_id,
                                           MAIN_SCREEN_NUMBER)
                             while true
                                 keycode = read_key(stdin)
@@ -263,45 +263,45 @@ function run_game(player_icons)
     write(stdout, read("log.txt"))
 end
 
+function select_players()
+    player_info = []
+    if isempty(player_info)
+        selection = string.(collect("🦊👾🐖🐈🐨🐇🐢🦖🦕👧👦🧔"))
+        pushfirst!(selection, "[none]")
+        menu = REPL.TerminalMenus.RadioMenu(selection)
+        for i=1:length(keymaps)
+            default_sel = i > 3 ? 1 : i+1
+            p = REPL.TerminalMenus.request("Select player $i", menu,
+                                           cursor=default_sel)
+            if p != 1
+                push!(player_info, (keymaps[i], only(selection[p])))
+            end
+        end
+    end
+    return player_info
+end
+
 function main(args)
     remote = false
     i = 1
-    num_players = 2
-    player_icons = []
     while i <= length(args)
         arg = args[i]
         if arg == "-r"
             remote = true
-        elseif arg == "-p"
-            i += 1
-            if i > length(args) || length(args[i]) > 1
-                println(stderr, "ERROR: Expected emoji after -p option")
-                exit(1)
-            end
-            push!(player_icons, only(args[i]))
+        else
+            error("Unknown option: \"$arg\"")
         end
         i += 1
     end
-    if isempty(player_icons)
-        selection = string.(collect("👧👦🧔🐖👾🦊"))
-        push!(selection, "[none]")
-        none = length(selection)
-        menu = REPL.TerminalMenus.RadioMenu(selection)
-        p1 = REPL.TerminalMenus.request("Select player 1", menu, cursor=1)
-        p2 = REPL.TerminalMenus.request("Select player 2", menu, cursor=2)
-        p3 = REPL.TerminalMenus.request("Select player 3", menu, cursor=none)
-        p1 != none && push!(player_icons, only(selection[p1]))
-        p2 != none && push!(player_icons, only(selection[p2]))
-        p3 != none && push!(player_icons, only(selection[p3]))
-    end
-    if isempty(length(player_icons)) || length(player_icons) > 3
-        println(stderr, "ERROR: There are keymaps defined for only up to three players")
+    player_info = select_players()
+    if isempty(player_info)
+        println(stderr, "ERROR: Must have at least one keymap selected")
         exit(1)
     end
     if remote
-        Gameoji.run_game_client(; player_icons)
+        Gameoji.run_game_client(; player_info)
     else
-        run_game(player_icons)
+        run_game(player_info)
     end
 end
 

@@ -1,30 +1,51 @@
 # Keys. May be bound to a keyboard using make_keymap()
-right_keys = Dict(
-    ARROW_UP   =>(:move, VI[0, 1]),
-    ARROW_DOWN =>(:move, VI[0,-1]),
-    ARROW_LEFT =>(:move, VI[-1,0]),
-    ARROW_RIGHT=>(:move, VI[1, 0]),
-    '0'        =>(:use_item, '💣'),
-    '-'        =>(:use_item, '🔨'),
-    '='        =>(:use_item, '💠'))
-
-left_keys = Dict(
-    'w'=>(:move, VI[0, 1]),
-    's'=>(:move, VI[0,-1]),
-    'a'=>(:move, VI[-1,0]),
-    'd'=>(:move, VI[1, 0]),
-    '1'=>(:use_item, '💣'),
-    '2'=>(:use_item, '🔨'),
-    '3'=>(:use_item, '💠'))
-
-middle_keys = Dict(
-    'i'=>(:move, VI[0, 1]),
-    'k'=>(:move, VI[0,-1]),
-    'j'=>(:move, VI[-1,0]),
-    'l'=>(:move, VI[1, 0]),
-    '5'=>(:use_item, '💣'),
-    '6'=>(:use_item, '🔨'),
-    '7'=>(:use_item, '💠'))
+keymaps = [
+    Dict(
+        ARROW_UP   =>(:move, VI[0, 1]),
+        ARROW_DOWN =>(:move, VI[0,-1]),
+        ARROW_LEFT =>(:move, VI[-1,0]),
+        ARROW_RIGHT=>(:move, VI[1, 0]),
+        '['        =>(:use_item, '💣'),
+        ']'        =>(:use_item, '🔨'),
+        '\\'       =>(:use_item, '💠')
+    ),
+    Dict(
+        '8'=>(:move, VI[0, 1]),
+        '2'=>(:move, VI[0,-1]),
+        '4'=>(:move, VI[-1,0]),
+        '6'=>(:move, VI[1, 0]),
+        DEL_KEY   =>(:use_item, '💣'),
+        END_KEY   =>(:use_item, '🔨'),
+        PAGE_DOWN =>(:use_item, '💠')
+    ),
+    Dict(
+        'd'=>(:move, VI[0, 1]),
+        'c'=>(:move, VI[0,-1]),
+        'x'=>(:move, VI[-1,0]),
+        'v'=>(:move, VI[1, 0]),
+        'q'=>(:use_item, '💣'),
+        'w'=>(:use_item, '🔨'),
+        'e'=>(:use_item, '💠')
+    ),
+    Dict(
+        'h'=>(:move, VI[0, 1]),
+        'n'=>(:move, VI[0,-1]),
+        'b'=>(:move, VI[-1,0]),
+        'm'=>(:move, VI[1, 0]),
+        'r'=>(:use_item, '💣'),
+        't'=>(:use_item, '🔨'),
+        'y'=>(:use_item, '💠')
+    ),
+    Dict(
+        'l'=>(:move, VI[0, 1]),
+        '.'=>(:move, VI[0,-1]),
+        ','=>(:move, VI[-1,0]),
+        '/'=>(:move, VI[1, 0]),
+        'u'=>(:use_item, '💣'),
+        'i'=>(:use_item, '🔨'),
+        'o'=>(:use_item, '💠')
+    ),
+]
 
 function join_player!(game, screen_number, icon, keymap)
     push!(game.joined_players, (screen_number, icon, keymap))
@@ -34,13 +55,8 @@ function join_player!(game, screen_number, icon, keymap)
 end
 
 # TODO: Do we need to distinguish keyboard_id and screen_number?
-function join_players!(game, player_icons, keyboard_id, screen_number)
-    all_keys = [left_keys, right_keys, middle_keys]
-    if length(player_icons) == 1
-        # Prefer right hand keys for single player
-        all_keys = [right_keys]
-    end
-    for (icon,keys) in zip(player_icons, all_keys)
+function join_players!(game, player_info, keyboard_id, screen_number)
+    for (keys,icon) in player_info
         join_player!(game, screen_number, icon,
                      make_keymap(keyboard_id, keys))
     end
